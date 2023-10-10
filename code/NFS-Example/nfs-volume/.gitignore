@@ -1,0 +1,5 @@
+# Ignore all files
+*
+
+# Unignore .gitignore just incase
+!.gitignore
