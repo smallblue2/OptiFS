@@ -1,5 +1,18 @@
 #define FUSE_USE_VERSION 31
 
+/* A basic example of a virtual file system using libfuse library.
+ * Mounts a virtual file system to the mounting point specified,
+ * and includes a "Hello" file containing "Hello World!".
+ * 
+ * Compile with:
+ *
+ *     gcc -Wall hello.c `pkg-config fuse3 --cflags --libs` -o hello
+ *
+ * Run with:
+ *
+ *     ./hello <path-to-mounting-point>
+ */
+
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
