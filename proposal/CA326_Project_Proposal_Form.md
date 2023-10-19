@@ -27,7 +27,7 @@ OptiFS would deliver performance by massively reducing the file count on shared 
 
 We would innovate an increasingly difficult and logistically challenging problem introduced by managing many users on many machines by combining elements of systems programming, web development and database management.
 
-![A preliminary diagram of the systems and architecture in place](OptiFS_Diagram.pdf)
+![A preliminary diagram of the systems and architecture in place](OptiFS_Diagram.png)
 
 ### Concept Ideas
 **Content-Based Hashing** will be used to store data based on its content rather than its name or location. This will be used to reduce duplicate data stored between all users as a whole.
