@@ -17,15 +17,15 @@ Prof. Stephen Blott
 ## Project Description
 
 ### What is it?
-OptiFS, a modern day solution specifically for large groups of machines accessing a shared file system through Network File System (NFS).
+OptiFS, a storage solution for large groups of machines accessing a shared file system through Network File System (NFS).
 
 Computer labs contain clusters of computers, and when user files are managed by shared file systems like NFS, storing all this data can become a very large, costly and impractical task. Slow disk operations are a notoriously frustrating experience amongst students during exams, labs and any situation where many shared machines are powered on and running at the same time.
 
-Furthermore as a student, it can be a jarring experience having to physically attend computer labs to retrieve your work or data. Being able to view and download your files on the go means that you can access your files anywhere and at any time.
+Furthermore as a student, it can be a jarring experience having to physically attend computer labs to retrieve your work or data. We will create an online interface allowing students to view and download their files on the go - anywhere, any time.
 
-OptiFS would deliver performance by massively reducing the file count on shared file systems through deduplication and give users additional interfaces to access their information where they may need.
+OptiFS will deliver storage performance by massively reducing the file count on shared file systems through deduplication and give users additional interfaces to access their information where they may need.
 
-We would innovate an increasingly difficult and logistically challenging problem introduced by managing many users on many machines by combining elements of systems programming, web development and database management.
+We will innovate an increasingly difficult and logistically challenging problem introduced by managing many users on many machines by combining elements of systems programming, web development and database management.
 
 ![A preliminary diagram of the systems and architecture in place](OptiFS_Diagram.png)
 
@@ -38,7 +38,7 @@ We would innovate an increasingly difficult and logistically challenging problem
 
 **User Web Interface** likely implemented through websockets to fetch file content without reloading the page. Viewing content will differ depending on file/media format (e.g. txt, mp3, mp4, png, pdf) and users will be able to download files directly.
 
-**Optimizations** will include implementation of a caching system for frequently accessed files to avoid constantly having to query the storage system every time. If time allows, we could also introduce “chunking” for very large files so if two large files differ slightly, we wouldn’t have to store two almost identical files.
+**Optimizations** will include implementation of a caching system for frequently accessed files to avoid constantly having to query the storage system every time. If time allows, we could also introduce “chunking” for very large files so if two large files differ slightly, we won’t have to store two almost identical files.
 
 ## Division of Work
 
@@ -48,11 +48,11 @@ We have decided to set up sprints using Jira for a scrum development lifecycle. 
 ### Strength-Based Task Assignment
 While we are both interested in our own topics, we will try to assign work where we think suits best, delving into both sides of development.
 
-Typically speaking, Niall leans more towards lower level programming as he has more experience with operating systems concepts, systems programming languages, file systems, shell scripting and more. Loosely speaking, he would be more comfortable covering the:
+Typically speaking, Niall leans more towards lower level programming as he has more experience with operating systems concepts, systems programming languages, file systems, shell scripting and more. Loosely speaking, he will be more comfortable covering the:
 - Libfuse virtual file system 
 - Postgres database management
 
-Zoe has a passion for frontend development, with a keen eye for design. She is proficient in all aspects of web development, from development frameworks to UI components. She would be most comfortable covering the:
+Zoe has a passion for frontend development, with a keen eye for design. She is proficient in all aspects of web development, from development frameworks to UI components. She will be most comfortable covering the:
 - SvelteKit frontend interface
 - Django backend
 
