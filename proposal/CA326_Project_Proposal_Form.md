@@ -50,20 +50,22 @@ While we are both interested in our own topics, we will try to assign work where
 
 Typically speaking, Niall leans more towards lower level programming as he has more experience with operating systems concepts, systems programming languages, file systems, shell scripting and more. Loosely speaking, he will be more comfortable covering the:
 - Libfuse virtual file system 
-- Postgres database management
+- Caching System
+- Module Containerisation
 
 Zoe has a passion for frontend development, with a keen eye for design. She is proficient in all aspects of web development, from development frameworks to UI components. She will be most comfortable covering the:
 - SvelteKit frontend interface
 - Django backend
+- Postgres database management
+
 
 ## Programming Languages
 
 ### Systems Programming
 - Go
-- C
 
 ### Web Development
-- Javascript / Typescript
+- Javascript
 - Python
 
 ### Database Management
@@ -73,7 +75,6 @@ Zoe has a passion for frontend development, with a keen eye for design. She is p
 
 ### Systems Programming
 - Libfuse
-- Make
 
 ### Web Development
 - SvelteKit
@@ -82,6 +83,9 @@ Zoe has a passion for frontend development, with a keen eye for design. She is p
 
 ### Database
 - Postgres
+
+### Caching
+- Redis
 
 ### Containerization
 - Docker
