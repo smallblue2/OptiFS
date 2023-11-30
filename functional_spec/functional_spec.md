@@ -29,11 +29,11 @@
    15. [View a File on Webpage*](#315-view-a-file-on-webpage)
    16. [Downloading a File from Website*](#316-downloading-a-file-from-website)
 4. [System Architecture](#4-system-architecture)
-   1. [Minimum Viable Product](#41-minimum-viable-product)
+   1. [Minimum Viable Product Diagram](#41-minimum-viable-product)
        1. [Client-Side](#411-client-side)
        2. [OptiFS Server](#412-optifs-server)
        3. [Cloud](#413-cloud)
-   2. [Stretch Goals](#42-stretch-goals)
+   2. [Stretch Goal Diagram](#42-stretch-goals)
 5. [High-Level Design](#5-high-level-design)
    1. [Data Flow Diagram](#51-data-flow-diagram)
    2. [Component Diagram](#52-component-diagram)
@@ -393,22 +393,22 @@ This is the frontend to our web interface. This will display all the information
 ## 5.1 Data Flow Diagram
 A Data Flow Diagram illustrates how data moves through a system. It focuses on the flow of information and the transformations that data undergoes.
 
-### 5.1.1 Minimum Viable Product
+### 5.1.1 Minimum Viable Product Diagram
 ![A diagram showing the data flow diagram of the minimum viable product version of the system](MVP_DFD.png)
 
-### 5.1.2 Stretch Goals
+### 5.1.2 Stretch Goals Diagram
 
 ## 5.2 Component Diagram
 
-### 5.2.1 Minimum Viable Product
+### 5.2.1 Minimum Viable Product Diagram
 
-### 5.2.2 Stretch Goals
+### 5.2.2 Stretch Goals Diagram
 
 ## 5.3 Another Diagram
 
-### 5.3.1 Minimum Viable Product
+### 5.3.1 Minimum Viable Product Diagram
 
-### 5.3.2 Stretch Goals
+### 5.3.2 Stretch Goals Diagram
 
 # 6. Preliminary Schedule
 
