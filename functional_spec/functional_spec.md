@@ -54,8 +54,8 @@ Secondary system functions are to optimise file retrieval speeds from the OptiFS
 
 The system will be fully compatible with existing computer lab systems and directly implemented on the NFS server that already handles user data.
 
-Here is a visualisation of the system:
-**Minimum Viable Product**
+Here is a visualisation of the system:\
+**Minimum Viable Product**\
 ![A system architecture diagram of the minimum viable product of the proposed system](MVP_System_Architecture.png)
 
 _Note: Any item denoted by an asterisk (*) throughout this document is in relation to one of our stretch goals._
@@ -418,7 +418,7 @@ A Data Flow Diagram illustrates how data moves through a system. It focuses on t
 ### 5.3.2 Stretch Goals Diagram
 
 # 6. Preliminary Schedule
-We have outlined an initial schedule below which serves as a roadmap for our project's development. Please note that this schedule is provisional and may be adjusted as the project progresses and as we refine our understanding of the work completed and the work remaining. We are committed to maintaining flexibility in our planning to accommodate any changes that may arise during the course of the project, especially with the inclusion of stretch goals.
+We have outlined an initial schedule below which serves as a roadmap for our project's development. Please note that this schedule is provisional and may be adjusted as the project progresses and as we refine our understanding of the work completed and the work remaining. We are committed to maintaining flexibility in our planning to accommodate any changes that may arise during the course of the project, especially with the inclusion of stretch goals.\
 ![A Gantt chart to illustrate the preliminary schedule of the project](Gantt_Chart.png)
 
 # 7. Appendices
