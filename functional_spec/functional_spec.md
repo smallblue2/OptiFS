@@ -46,13 +46,19 @@
 ## 1.1 Overview
 The system is a storage solution for large groups of machines accessing a shared file system through Network File System (NFS). The system’s application is intended for computer lab environments, where there is a sizable cohort of users and substantial demand on the machines where optimisation and efficiency is required.
 
-There is a need for this system, particularly in the setting of the computer labs in Dublin City University, as storage quotas are difficult to stay under - an exponentially more difficult task as demand for storage increases. This solution allows computer labs to be implemented in a far more scalable and efficient manner from a user data perspective.
+There is a need for this system, particularly in the setting of the computer labs in Dublin City University, as storage quotas are difficult to stay under - which becomes more strenuous as demand for storage increases. This solution allows computer labs to be implemented in a far more scalable and efficient manner from a user data perspective.
 
 The primary system function will be to optimise the storage efficiency of user cohorts’ information by getting rid of duplicate files, whilst still allowing multiple users to own said files. 
 
 Secondary system functions are to optimise file retrieval speeds from the OptiFS server by implementing a caching system for regularly retrieved files and to allow the viewing and retrieval of files through the internet via a website, allowing users to access their file system contents on-the-go. These functionalities are stretch-goals that will be implemented depending on progress made as the project deadline approaches.
 
 The system will be fully compatible with existing computer lab systems and directly implemented on the NFS server that already handles user data.
+
+Here is a visualisation of the system:
+**Minimum Viable Product**
+![A system architecture diagram of the minimum viable product of the proposed system](MVP_System_Architecture.png)
+
+_Note: Any item denoted by an asterisk (*) throughout this document is in relation to one of our stretch goals._
 
 ## 1.2 Business Context
 This system will be fully compatible with any existing computer lab system powered by NFS and could be easily deployed in the Dublin City University’s McNulty building computer labs.
