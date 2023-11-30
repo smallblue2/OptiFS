@@ -3,7 +3,6 @@
    1. [Overview](#11-overview)
    2. [Business Context](#12-business-context)
    3. [Glossary](#13-glossary)
-   4. [References](#14-references)
 2. [General Description](#2-general-description)
    1. [Product / System Functions](#21-product--system-functions)
        1. [Primary Functions](#211-primary-functions)
@@ -35,11 +34,17 @@
        3. [Cloud](#413-cloud)
    2. [Stretch Goal Diagram](#42-stretch-goals)
 5. [High-Level Design](#5-high-level-design)
-   1. [Data Flow Diagram](#51-data-flow-diagram)
-   2. [Component Diagram](#52-component-diagram)
+   1. [Data Flow Diagrams](#51-data-flow-diagram)
+        1. [Minimum Viable Product DFD](#511-minimum-viable-product-data-flow-diagram)
+        2. [Stretch Goal DFD](#512-stretch-goals-diagram-data-flow-diagram)
+   2. [Sequence Diagrams](#52-sequence-diagram)
+        1. [Writing to OptiFS](#521-writing-to-optifs)
+        2. [Reading from OptiFS](#522-reading-from-optifs)
+        3. [Garbage Collection](#523-garbage-collection)
    3. [Another Diagram](#53-another-diagram)
 6. [Preliminary Schedule](#6-preliminary-schedule)
 7. [Appendices](#7-appendices)
+    1. [References](#71-references)
 
 # 1. Introduction
 
@@ -54,8 +59,8 @@ Secondary system functions are to optimise file retrieval speeds from the OptiFS
 
 The system will be fully compatible with existing computer lab systems and directly implemented on the NFS server that already handles user data.
 
-Here is a visualisation of the system:\
-**Minimum Viable Product**\
+Here is a visualisation of the system:
+
 ![A system architecture diagram of the minimum viable product of the proposed system](MVP_System_Architecture.png)
 
 _Note: Any item denoted by an asterisk (*) throughout this document is in relation to one of our stretch goals._
@@ -67,7 +72,6 @@ This system will be fully compatible with any existing computer lab system power
 | **NFS** | **Network File System** - a protocol that allows a user on a client computer to access files over a network (remote file sharing) |
 |---|---|
 
-## 1.4 References
 # 2. General Description
 
 ## 2.1 Product / System Functions
@@ -399,26 +403,30 @@ This is the frontend to our web interface. This will display all the information
 ## 5.1 Data Flow Diagram
 A Data Flow Diagram illustrates how data moves through a system. It focuses on the flow of information and the transformations that data undergoes.
 
-### 5.1.1 Minimum Viable Product Diagram
+### 5.1.1 Minimum Viable Product Data Flow Diagram
 ![A diagram showing the data flow diagram of the minimum viable product version of the system](MVP_DFD.png)
 
-### 5.1.2 Stretch Goals Diagram
+### 5.1.2 Stretch Goals Diagram Data Flow Diagram
 ![A diagram showing the data flow diagram of the stretch goal version of the system](STR_DFD.png)
 
-## 5.2 Component Diagram
+## 5.2 Sequence Diagram
+These diagrams show the sequence of operations in vital primitive functions of our project.\
+_Note: All sequence diagrams are of the minimum viable product version of the system._
 
-### 5.2.1 Minimum Viable Product Diagram
+### 5.2.1 Writing To OptiFS
+![A diagram showing the sequence of operations included in a write operation](Write_Sequence_Diagram.png)
 
-### 5.2.2 Stretch Goals Diagram
+### 5.2.2 Reading From OptiFS
+![A diagram showing the sequence of operations included in a read operation](Read_Sequence_Diagram.png)
 
-## 5.3 Another Diagram
-
-### 5.3.1 Minimum Viable Product Diagram
-
-### 5.3.2 Stretch Goals Diagram
+### 5.2.3 Garbage Collection
+![A diagram showing the sequence of operations included in the garbage collection sub-system](Garbage_Collector_Sequence_Diagram.png)
 
 # 6. Preliminary Schedule
-We have outlined an initial schedule below which serves as a roadmap for our project's development. Please note that this schedule is provisional and may be adjusted as the project progresses and as we refine our understanding of the work completed and the work remaining. We are committed to maintaining flexibility in our planning to accommodate any changes that may arise during the course of the project, especially with the inclusion of stretch goals.\
+We have outlined an initial schedule below which serves as a roadmap for our project's development. Please note that this schedule is provisional and may be adjusted as the project progresses and as we refine our understanding of the work completed and the work remaining. We are committed to maintaining flexibility in our planning to accommodate any changes that may arise during the course of the project, especially with the inclusion of stretch goals.
+
 ![A Gantt chart to illustrate the preliminary schedule of the project](Gantt_Chart.png)
 
 # 7. Appendices
+
+## 7.1 References
