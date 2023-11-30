@@ -418,5 +418,7 @@ A Data Flow Diagram illustrates how data moves through a system. It focuses on t
 ### 5.3.2 Stretch Goals Diagram
 
 # 6. Preliminary Schedule
+We have outlined an initial schedule below which serves as a roadmap for our project's development. Please note that this schedule is provisional and may be adjusted as the project progresses and as we refine our understanding of the work completed and the work remaining. We are committed to maintaining flexibility in our planning to accommodate any changes that may arise during the course of the project, especially with the inclusion of stretch goals.
+![A Gantt chart to illustrate the preliminary schedule of the project](Gantt_Chart.png)
 
 # 7. Appendices
