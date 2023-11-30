@@ -397,6 +397,7 @@ A Data Flow Diagram illustrates how data moves through a system. It focuses on t
 ![A diagram showing the data flow diagram of the minimum viable product version of the system](MVP_DFD.png)
 
 ### 5.1.2 Stretch Goals Diagram
+![A diagram showing the data flow diagram of the stretch goal version of the system](STR_DFD.png)
 
 ## 5.2 Component Diagram
 
