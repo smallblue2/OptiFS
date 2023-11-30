@@ -55,11 +55,16 @@ There is a need for this system, particularly in the setting of the computer lab
 
 The primary system function will be to optimise the storage efficiency of user cohorts’ information by getting rid of duplicate files, whilst still allowing multiple users to own said files. 
 
-Secondary system functions are to optimise file retrieval speeds from the OptiFS server by implementing a caching system for regularly retrieved files and to allow the viewing and retrieval of files through the internet via a website, allowing users to access their file system contents on-the-go. These functionalities are stretch-goals that will be implemented depending on progress made as the project deadline approaches.
+
+Secondary system functions are; 
+ - To optimise file retrieval speeds from the OptiFS server by implementing a caching system for regularly retrieved files.
+ - To allow the viewing and retrieval of files through the internet via a website, allowing users to access their file system contents on-the-go.
+
+Secondary system functions are stretch goals, not part of the foundational system, but functionality we would like to implement if we have enough time. These are typically notated throughout the functional specification by asterisks (*).
 
 The system will be fully compatible with existing computer lab systems and directly implemented on the NFS server that already handles user data.
 
-Here is a visualisation of the system:
+Here is a visualisation of the primary system:
 
 ![A system architecture diagram of the minimum viable product of the proposed system](MVP_System_Architecture.png)
 
@@ -69,8 +74,11 @@ _Note: Any item denoted by an asterisk (*) throughout this document is in relati
 This system will be fully compatible with any existing computer lab system powered by NFS and could be easily deployed in the Dublin City University’s McNulty building computer labs.
 
 ## 1.3 Glossary
-| **NFS** | **Network File System** - a protocol that allows a user on a client computer to access files over a network (remote file sharing) |
+| Term | Definition  |
 |---|---|
+| **NFS** | **Network File System** - a protocol that allows a user on a client computer to access files over a network (remote file sharing)[^1] |
+| **LibFuse** | **Filesystem In User Space** - An interface for for userspace programs to export a filesystem to the Linux kernel[^2] |
+| **Redis** | An in-memory data structure store, used as a database, cache, and for message queuing[^3] |
 
 # 2. General Description
 
@@ -430,3 +438,6 @@ We have outlined an initial schedule below which serves as a roadmap for our pro
 # 7. Appendices
 
 ## 7.1 References
+[^1]: "Network File (NFS)", Ubuntu, November 2023, [Online] Available: https://ubuntu.com/server/docs/service-nfs [accessed Nov. 21st, 2023]
+[^2]: "libfuse" libfuse API documentation, n.d., [Online]. Available: http://libfuse.github.io/doxygen/ [accessed Nov. 23rd, 2023].
+[^3]: “Redis”, Redis, n.d., [Online] Available: https://redis.io/ [accessed Nov. 24th, 2023]
