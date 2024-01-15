@@ -6,7 +6,7 @@
  * 
  * Compile with:
  *
- *     gcc -Wall hello.c `pkg-config fuse3 --cflags --libs` -o hello
+ *     gcc -Wall myhello.c -I/usr/include/fuse3 -lfuse3 -lpthread -D_FILE_OFFSET_BITS=64 -o hello
  *
  * Run with:
  *
@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <stddef.h>
 #include <assert.h>
+#include <sys/stat.h>
 
 static struct options {
     const char * f_name;

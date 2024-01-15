@@ -21,6 +21,9 @@ RUN apt-get update && \
 # Create a directory to share
 RUN mkdir /nfs-share
 
+# Attach this to a volume
+VOLUME ["/nfs-share"]
+
 # Update the exports file
 RUN echo "/nfs-share *(rw,sync,no_subtree_check,no_root_squash,fsid=1)" > /etc/exports
 
@@ -28,7 +31,7 @@ RUN echo "/nfs-share *(rw,sync,no_subtree_check,no_root_squash,fsid=1)" > /etc/e
 RUN mkdir /logs
 
 # Attach the volume
-VOLUME ./logs /logs
+VOLUME ["/logs"]
 
 # Expose the NFS port
 EXPOSE 2049

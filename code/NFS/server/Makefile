@@ -4,7 +4,7 @@ build:
 	docker build -t vfs .
 
 run:
-	docker run --privileged -it -d --name nfs-server -p 2049:2049 -v ./logs:/logs vfs
+	docker run --privileged -it -d --name nfs-server -v ./logs:/logs -v /home/ryann62/College/Project/2024-CA326-zcollins-OptiFS/code/NFS/server/vol:/nfs-share -p 2049:2049 vfs
 
 stop:
 	docker container stop --time=10 nfs-server

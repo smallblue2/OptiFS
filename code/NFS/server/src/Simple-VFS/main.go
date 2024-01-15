@@ -52,6 +52,7 @@ func myNodeFactory(ctx context.Context, root *fs.Inode, inode uint64, content st
 var _ = (fs.NodeOpener)((*myNode)(nil))    // Open for a Regular File
 var _ = (fs.NodeGetattrer)((*myNode)(nil)) // Generic get attribute
 var _ = (fs.NodeReader)((*myNode)(nil))    // Read for a Regular File
+var _ = (fs.NodeStatfser)((*myNode)(nil))  // Status for filesystem FOR NFS!!!!
 
 // Read-only Open implementation
 func (n *myNode) Open(ctx context.Context, openFlags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
