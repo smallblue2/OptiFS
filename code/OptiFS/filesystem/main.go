@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log"
+	"os"
+	"path"
 	"path/filepath"
 	"syscall"
 
@@ -104,4 +108,39 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 
 func main() {
 	log.Println("Starting OptiFS")
+	log.SetFlags(log.Lmicroseconds)
+	debug := flag.Bool("debug", false, "enter debug mode")
+
+	flag.Parse() // parse arguments
+	if flag.NArg() < 2 {
+		fmt.Printf("usage: %s <mountpoint> <underlying filesystem>\n", path.Base(os.Args[0])) // show correct usage
+		fmt.Printf("\noptions:\n")
+		flag.PrintDefaults() // show what optional flags can be used
+		os.Exit(2)           // exit w/ error code
+	}
+
+	under := flag.Arg(1)
+	data := &OptiFSRoot{
+		Path: under,
+	}
+
+	// set the options for the filesystem:
+	options := &fs.Options{}
+	options.Debug = *debug                                                               // set the debug value the user chooses (T/F)
+	options.MountOptions.Options = append(options.MountOptions.Options, "fsname="+under) // set the filesystem name
+	options.NullPermissions = true                                                       // doesn't check the permissions for calls (good for setting up custom permissions [namespaces??])
+
+	root := &OptiFSNode{
+		RootNode: data,
+	}
+
+	// mount the filesystem
+	server, err := fs.Mount(flag.Arg(0), root, options)
+	if err != nil {
+		log.Fatalf("Mount Failed!!: %v\n", err)
+	}
+
+	log.Println("Mounted Successfully!")
+	server.Wait()
+
 }
