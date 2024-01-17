@@ -48,7 +48,9 @@ var _ = (fs.NodeGetxattrer)((*OptiFSNode)(nil))    // Get extended attributes of
 var _ = (fs.NodeSetxattrer)((*OptiFSNode)(nil))    // Set extended attributes of a node
 var _ = (fs.NodeRemovexattrer)((*OptiFSNode)(nil)) // Remove extended attributes of a node
 var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes of a node
-var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil)) // Creates a directory
+var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil))       // Creates a directory
+var _ = (fs.NodeUnlinker)((*OptiFSNode)(nil))      // Unlinks (deletes) a file
+var _ = (fs.NodeRmdirer)((*OptiFSNode)(nil))       // Unlinks (deletes) a directory
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -101,23 +103,23 @@ func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
 
 // lookup finds a file/directory based on its name
 func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	log.Printf("lookup performed for %v from node %v\n", name, n.path())
+	log.Printf("LOOKUP performed for %v from node %v\n", name, n.path())
 	fp := filepath.Join(n.path(), name) // getting the full path to the file (join name to path)
 	s := syscall.Stat_t{}               // status of a file
 	err := syscall.Lstat(fp, &s)        // gets the file attributes (also returns attrs of symbolic link)
 
 	if err != nil {
-        log.Println("LOOKUP FAILED!")
+		log.Println("LOOKUP FAILED!")
 		return nil, fs.ToErrno(err)
 	}
 
-    // Fill the output attributes from out stat struct
+	// Fill the output attributes from out stat struct
 	out.Attr.FromStat(&s)
-    // Create a new node to represent the underlying looked up file 
-    // or directory in our VFS
+	// Create a new node to represent the underlying looked up file
+	// or directory in our VFS
 	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &s)
-    // Create the inode structure within FUSE, copying the underlying
-    // file's attributes with an auto generated inode in idFromStat
+	// Create the inode structure within FUSE, copying the underlying
+	// file's attributes with an auto generated inode in idFromStat
 	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
 
 	return x, fs.OK
@@ -125,7 +127,7 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 
 // opens a directory and then closes it
 func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
-    // Open the directory (n), 0755 is the default perms for a new directory
+	// Open the directory (n), 0755 is the default perms for a new directory
 	dir, err := syscall.Open(n.path(), syscall.O_DIRECTORY, 0755)
 	if err != nil {
 		return fs.ToErrno(err)
@@ -136,7 +138,7 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 
 // opens a stream of dir entries,
 func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-    return fs.NewLoopbackDirStream(n.path()) // TODO: Implement ourselves maybe?
+	return fs.NewLoopbackDirStream(n.path()) // TODO: Implement ourselves maybe?
 }
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
@@ -146,11 +148,11 @@ func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.At
 		return fh.(fs.FileGetattrer).Getattr(ctx, out)
 	}
 
-    // OTHERWISE get the node's attributes (stat the node)
+	// OTHERWISE get the node's attributes (stat the node)
 	path := n.path()
 	var err error
 	s := syscall.Stat_t{}
-    // IF we're dealing with the root, stat it directly as opposed to handling symlinks
+	// IF we're dealing with the root, stat it directly as opposed to handling symlinks
 	if &n.Inode == n.Root() {
 		err = syscall.Stat(path, &s) // if we are looking for the root of FS
 	} else {
@@ -176,8 +178,8 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 		return nil, 0, fs.ToErrno(err)
 	}
 
-    // Creates a custom filehandle from the returned file descriptor from Open
-    lbFile := fs.NewLoopbackFile(fileDescriptor) // TODO: Implement with our own filehandle
+	// Creates a custom filehandle from the returned file descriptor from Open
+	lbFile := fs.NewLoopbackFile(fileDescriptor) // TODO: Implement with our own filehandle
 	return lbFile, 0, 0
 
 }
@@ -200,9 +202,9 @@ func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, fla
 
 // Remove EXTENDED attribute
 func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
-    log.Println("ENTERED REMOVEXATTR")
-    err := syscall.Removexattr(n.path(), attr)
-    return fs.ToErrno(err)
+	log.Println("ENTERED REMOVEXATTR")
+	err := syscall.Removexattr(n.path(), attr)
+	return fs.ToErrno(err)
 }
 
 // List EXTENDED attributes
@@ -215,33 +217,49 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 
 // Make a directory
 func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-    log.Println("ENTERED MKDIR")
-    // Create the directory
-    fp := filepath.Join(n.path(), name)
-    err := syscall.Mkdir(fp, mode)
-    if err != nil {
-        return nil, fs.ToErrno(err)
-    }
-    
-    // Now stat the new directory, ensuring it was created
-    var directoryStatus syscall.Stat_t
-    err = syscall.Stat(fp, &directoryStatus)
-    if err != nil {
-        return nil, fs.ToErrno(err)
-    }
+	log.Println("ENTERED MKDIR")
+	// Create the directory
+	fp := filepath.Join(n.path(), name)
+	err := syscall.Mkdir(fp, mode)
+	if err != nil {
+		return nil, fs.ToErrno(err)
+	}
 
-    // Fill the output attributes from out stat struct
+	// Now stat the new directory, ensuring it was created
+	var directoryStatus syscall.Stat_t
+	err = syscall.Stat(fp, &directoryStatus)
+	if err != nil {
+		return nil, fs.ToErrno(err)
+	}
+
+	// Fill the output attributes from out stat struct
 	out.Attr.FromStat(&directoryStatus)
 
-    // Create a new node to represent the underlying looked up file 
-    // or directory in our VFS
+	// Create a new node to represent the underlying looked up file
+	// or directory in our VFS
 	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &directoryStatus)
 
-    // Create the inode structure within FUSE, copying the underlying
-    // file's attributes with an auto generated inode in idFromStat
+	// Create the inode structure within FUSE, copying the underlying
+	// file's attributes with an auto generated inode in idFromStat
 	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&directoryStatus))
 
 	return x, fs.OK
+}
+
+// Unlinks (removes) a file
+func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
+	log.Printf("UNLINK performed on %v from node %v\n", name, n.path())
+	fp := filepath.Join(n.path(), name)
+	err := syscall.Unlink(fp)
+	return fs.ToErrno(err)
+}
+
+// Unlinks (removes) a directory
+func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
+	log.Printf("RMDIR performed on %v from node %v\n", name, n.path())
+    fp := filepath.Join(n.path(), name)
+    err := syscall.Rmdir(fp)
+    return fs.ToErrno(err)
 }
 
 func main() {
