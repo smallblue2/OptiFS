@@ -129,7 +129,7 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	// if we have a file handle, use it to get the attributes
 	if fh != nil {
-		return fh.(fs.FileGetattrer).Getattr(ctx, out)
+		return fh.(fs.FileGetattrer).Getattr(ctx, out) // TODO: maybe make our own?
 	}
 
 	path := n.path()
@@ -138,6 +138,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.At
 	if &n.Inode == n.Root() {
 		err = syscall.Stat(path, &s) // if we are looking for the root of FS
 	} else {
+		// Lstat = link stat, gets the actual file, not the link to the file (address	)
 		err = syscall.Lstat(path, &s) // if it's just a normal file/dir
 	}
 
@@ -152,7 +153,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.At
 // opens a file for reading, and returns a filehandle
 // flags determines how we open the file (read only, read-write)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fFlags uint32, errno syscall.Errno) {
-	flags = flags &^ syscall.O_APPEND // clears all bits in flags (1 to 0), for appending to end of file (&^ = AND NOT)
+	flags = flags &^ syscall.O_APPEND // clears all bits in flags (1 to 0), removing append from the flags (&^ = AND NOT)
 	path := n.path()
 	file, err := syscall.Open(path, int(flags), 0) // try to open the file at path
 	if err != nil {
