@@ -71,17 +71,19 @@ func (n *OptiFSNode) path() string {
 
 // create a new node in the system
 func (n *OptiFSRoot) newNode(parent *fs.Inode, name string, s *syscall.Stat_t) fs.InodeEmbedder {
-	// if the new node was already defined
+	// If the NewNode function has a custom definition, use it
 	if n.NewNode != nil {
 		return n.NewNode(n, parent, name, s)
 	}
 
-	// if there's no custom node, do the default creation
+	// Otherwise, create an OptiFSNode and return it's address
 	return &OptiFSNode{
-		RootNode: n,
+		RootNode: n, // Set the root (so we can keep track of it easily)
 	}
 }
 
+// Function creates a custom, unique, inode number from a file stat structure
+//
 // since we're using NFS, theres a chance not all Inode numbers will be unique, so we
 // calculate one using bit swapping
 func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
@@ -90,25 +92,31 @@ func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
 	swappedRoot := (n.Dev << 32) | (n.Dev << 32)
 
 	return fs.StableAttr{
-		Mode: uint32(s.Mode),                  // perms
+		Mode: uint32(s.Mode),                  // Copy the underlying files perms
 		Gen:  1,                               // generation number (determines lifetime of inode)
-		Ino:  (swapped ^ swappedRoot) ^ s.Ino, // the inode number
+		Ino:  (swapped ^ swappedRoot) ^ s.Ino, // Unique generated inode number
 	}
 }
 
 // lookup finds a file/directory based on its name
 func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	log.Println("lookup performed")
+	log.Printf("lookup performed for %v from node %v\n", name, n.path())
 	fp := filepath.Join(n.path(), name) // getting the full path to the file (join name to path)
 	s := syscall.Stat_t{}               // status of a file
 	err := syscall.Lstat(fp, &s)        // gets the file attributes (also returns attrs of symbolic link)
 
 	if err != nil {
+        log.Println("LOOKUP FAILED!")
 		return nil, fs.ToErrno(err)
 	}
 
-	out.Attr.FromStat(&s)                                 // fill attrs to struct
-	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &s) // create new node to rep file
+    // Fill the output attributes from out stat struct
+	out.Attr.FromStat(&s)
+    // Create a new node to represent the underlying looked up file 
+    // or directory in our VFS
+	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &s)
+    // Create the inode structure within FUSE, copying the underlying
+    // file's attributes with an auto generated inode in idFromStat
 	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
 
 	return x, fs.OK
@@ -116,33 +124,36 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 
 // opens a directory and then closes it
 func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
+    // Open the directory (n), 0755 is the default perms for a new directory
 	dir, err := syscall.Open(n.path(), syscall.O_DIRECTORY, 0755)
 	if err != nil {
 		return fs.ToErrno(err)
 	}
-	syscall.Close(dir) // close when done
+	syscall.Close(dir) // close when finished
 	return fs.OK
 }
 
 // opens a stream of dir entries,
 func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	return fs.NewLoopbackDirStream(n.path())
+    return fs.NewLoopbackDirStream(n.path()) // TODO: Implement ourselves maybe?
 }
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
 func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	// if we have a file handle, use it to get the attributes
 	if fh != nil {
-		return fh.(fs.FileGetattrer).Getattr(ctx, out) // TODO: maybe make our own?
+		return fh.(fs.FileGetattrer).Getattr(ctx, out)
 	}
 
+    // OTHERWISE get the node's attributes (stat the node)
 	path := n.path()
 	var err error
 	s := syscall.Stat_t{}
+    // IF we're dealing with the root, stat it directly as opposed to handling symlinks
 	if &n.Inode == n.Root() {
 		err = syscall.Stat(path, &s) // if we are looking for the root of FS
 	} else {
-		// Lstat = link stat, gets the actual file, not the link to the file (address	)
+		// Otherwise, use Lstat to handle symlinks as well as normal files/directories
 		err = syscall.Lstat(path, &s) // if it's just a normal file/dir
 	}
 
@@ -154,17 +165,18 @@ func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.At
 	return fs.OK
 }
 
-// opens a file for reading, and returns a filehandle
+// Opens a file for reading, and returns a filehandle
 // flags determines how we open the file (read only, read-write)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fFlags uint32, errno syscall.Errno) {
-	flags = flags &^ syscall.O_APPEND // clears all bits in flags (1 to 0), removing append from the flags (&^ = AND NOT)
+	flags = flags &^ syscall.O_APPEND // Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
 	path := n.path()
-	file, err := syscall.Open(path, int(flags), 0) // try to open the file at path
+	fileDescriptor, err := syscall.Open(path, int(flags), 0) // try to open the file at path
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
 
-	lbFile := fs.NewLoopbackFile(file) // makes a filehandle
+    // Creates a custom filehandle from the returned file descriptor from Open
+    lbFile := fs.NewLoopbackFile(fileDescriptor) // TODO: Implement with our own filehandle
 	return lbFile, 0, 0
 
 }
