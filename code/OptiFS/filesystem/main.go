@@ -40,10 +40,13 @@ type OptiFSNode struct {
 var _ = (fs.NodeStatfser)((*OptiFSNode)(nil))  // StatFS
 var _ = (fs.InodeEmbedder)((*OptiFSNode)(nil)) // Inode
 var _ = (fs.NodeLookuper)((*OptiFSNode)(nil))  // lookup
+var _ = (fs.NodeOpendirer)((*OptiFSNode)(nil)) // opening directories
+var _ = (fs.NodeReaddirer)((*OptiFSNode)(nil)) // read directory
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
 func (n *OptiFSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	log.Println("In statfs")
 	// As this is a loopback filesystem, we will stat the underlying filesystem.
 	var s syscall.Statfs_t = syscall.Statfs_t{}
 	err := syscall.Statfs(n.path(), &s)
@@ -56,6 +59,7 @@ func (n *OptiFSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Er
 
 // Path returns the full path to the underlying file in the underlying filesystem
 func (n *OptiFSNode) path() string {
+	log.Println("In path()")
 	// Get 'n's node's path relative to OptiFS's root
 	var path string = n.Path(n.Root())
 	return filepath.Join(n.RootNode.Path, path)
@@ -77,6 +81,7 @@ func (n *OptiFSRoot) newNode(parent *fs.Inode, name string, s *syscall.Stat_t) f
 // since we're using NFS, theres a chance not all Inode numbers will be unique, so we
 // calculate one using bit swapping
 func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
+	log.Println("In IDStat")
 	// swap the higher and lower bits to generate unique no
 	swapped := (uint64(s.Dev) << 32) | (uint64(s.Dev) >> 32)
 	swappedRoot := (n.Dev << 32) | (n.Dev << 32)
@@ -104,6 +109,21 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
 
 	return x, fs.OK
+}
+
+// opens a directory and then closes it
+func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
+	dir, err := syscall.Open(n.path(), syscall.O_DIRECTORY, 0755)
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+	syscall.Close(dir) // close when done
+	return fs.OK
+}
+
+// opens a stream of dir entries,
+func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	return fs.NewLoopbackDirStream(n.path())
 }
 
 func main() {
@@ -140,7 +160,7 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
-	log.Println("Mounted Successfully!")
+	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
 	server.Wait()
 
 }
