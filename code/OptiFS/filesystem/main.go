@@ -37,13 +37,17 @@ type OptiFSNode struct {
 }
 
 // Interfaces/contracts to abide by
-var _ = (fs.NodeStatfser)((*OptiFSNode)(nil))  // StatFS
-var _ = (fs.InodeEmbedder)((*OptiFSNode)(nil)) // Inode
-var _ = (fs.NodeLookuper)((*OptiFSNode)(nil))  // lookup
-var _ = (fs.NodeOpendirer)((*OptiFSNode)(nil)) // opening directories
-var _ = (fs.NodeReaddirer)((*OptiFSNode)(nil)) // read directory
-var _ = (fs.NodeGetattrer)((*OptiFSNode)(nil)) // get attributes of a file/dir
-var _ = (fs.NodeOpener)((*OptiFSNode)(nil))    // open a file
+var _ = (fs.NodeStatfser)((*OptiFSNode)(nil))      // StatFS
+var _ = (fs.InodeEmbedder)((*OptiFSNode)(nil))     // Inode
+var _ = (fs.NodeLookuper)((*OptiFSNode)(nil))      // lookup
+var _ = (fs.NodeOpendirer)((*OptiFSNode)(nil))     // opening directories
+var _ = (fs.NodeReaddirer)((*OptiFSNode)(nil))     // read directory
+var _ = (fs.NodeGetattrer)((*OptiFSNode)(nil))     // get attributes of a file/dir
+var _ = (fs.NodeOpener)((*OptiFSNode)(nil))        // open a file
+var _ = (fs.NodeGetxattrer)((*OptiFSNode)(nil))    // Get extended attributes of a node
+var _ = (fs.NodeSetxattrer)((*OptiFSNode)(nil))    // Set extended attributes of a node
+var _ = (fs.NodeRemovexattrer)((*OptiFSNode)(nil)) // Remove extended attributes of a node
+var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes of a node
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -165,6 +169,37 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 
 }
 
+// Get EXTENDED attribute
+func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	log.Println("ENTERED GETXATTR")
+	// Pass it down to the filesystem below
+	attributeSize, err := syscall.Getxattr(n.path(), attr, dest)
+	return uint32(attributeSize), fs.ToErrno(err)
+}
+
+// Set EXTENDED attribute
+func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
+	log.Println("ENTERED SETXATTR")
+	// Pass it down to the filesystem below
+	err := syscall.Setxattr(n.path(), attr, data, int(flags))
+	return fs.ToErrno(err)
+}
+
+// Remove EXTENDED attribute
+func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
+    log.Println("ENTERED REMOVEXATTR")
+    err := syscall.Removexattr(n.path(), attr)
+    return fs.ToErrno(err)
+}
+
+// List EXTENDED attributes
+func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	log.Println("ENTERED LISTXATTR")
+	// Pass it down to the filesystem below
+	allAttributesSize, err := syscall.Listxattr(n.path(), dest)
+	return uint32(allAttributesSize), fs.ToErrno(err)
+}
+
 func main() {
 	log.Println("Starting OptiFS")
 	log.SetFlags(log.Lmicroseconds)
@@ -199,7 +234,10 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
+	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
+	log.Printf("DEBUG: %v", options.Debug)
+	log.Println("=========================================================")
 	server.Wait()
 
 }
