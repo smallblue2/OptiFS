@@ -48,6 +48,7 @@ var _ = (fs.NodeGetxattrer)((*OptiFSNode)(nil))    // Get extended attributes of
 var _ = (fs.NodeSetxattrer)((*OptiFSNode)(nil))    // Set extended attributes of a node
 var _ = (fs.NodeRemovexattrer)((*OptiFSNode)(nil)) // Remove extended attributes of a node
 var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes of a node
+var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil)) // Creates a directory
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -210,6 +211,37 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 	// Pass it down to the filesystem below
 	allAttributesSize, err := syscall.Listxattr(n.path(), dest)
 	return uint32(allAttributesSize), fs.ToErrno(err)
+}
+
+// Make a directory
+func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+    log.Println("ENTERED MKDIR")
+    // Create the directory
+    fp := filepath.Join(n.path(), name)
+    err := syscall.Mkdir(fp, mode)
+    if err != nil {
+        return nil, fs.ToErrno(err)
+    }
+    
+    // Now stat the new directory, ensuring it was created
+    var directoryStatus syscall.Stat_t
+    err = syscall.Stat(fp, &directoryStatus)
+    if err != nil {
+        return nil, fs.ToErrno(err)
+    }
+
+    // Fill the output attributes from out stat struct
+	out.Attr.FromStat(&directoryStatus)
+
+    // Create a new node to represent the underlying looked up file 
+    // or directory in our VFS
+	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &directoryStatus)
+
+    // Create the inode structure within FUSE, copying the underlying
+    // file's attributes with an auto generated inode in idFromStat
+	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&directoryStatus))
+
+	return x, fs.OK
 }
 
 func main() {
