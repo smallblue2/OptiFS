@@ -42,11 +42,12 @@ var _ = (fs.InodeEmbedder)((*OptiFSNode)(nil)) // Inode
 var _ = (fs.NodeLookuper)((*OptiFSNode)(nil))  // lookup
 var _ = (fs.NodeOpendirer)((*OptiFSNode)(nil)) // opening directories
 var _ = (fs.NodeReaddirer)((*OptiFSNode)(nil)) // read directory
+var _ = (fs.NodeGetattrer)((*OptiFSNode)(nil)) // get attributes of a file/dir
+var _ = (fs.NodeOpener)((*OptiFSNode)(nil))    // open a file
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
 func (n *OptiFSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	log.Println("In statfs")
 	// As this is a loopback filesystem, we will stat the underlying filesystem.
 	var s syscall.Statfs_t = syscall.Statfs_t{}
 	err := syscall.Statfs(n.path(), &s)
@@ -59,7 +60,6 @@ func (n *OptiFSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Er
 
 // Path returns the full path to the underlying file in the underlying filesystem
 func (n *OptiFSNode) path() string {
-	log.Println("In path()")
 	// Get 'n's node's path relative to OptiFS's root
 	var path string = n.Path(n.Root())
 	return filepath.Join(n.RootNode.Path, path)
@@ -81,7 +81,6 @@ func (n *OptiFSRoot) newNode(parent *fs.Inode, name string, s *syscall.Stat_t) f
 // since we're using NFS, theres a chance not all Inode numbers will be unique, so we
 // calculate one using bit swapping
 func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
-	log.Println("In IDStat")
 	// swap the higher and lower bits to generate unique no
 	swapped := (uint64(s.Dev) << 32) | (uint64(s.Dev) >> 32)
 	swappedRoot := (n.Dev << 32) | (n.Dev << 32)
@@ -124,6 +123,45 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 // opens a stream of dir entries,
 func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	return fs.NewLoopbackDirStream(n.path())
+}
+
+// get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
+func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	// if we have a file handle, use it to get the attributes
+	if fh != nil {
+		return fh.(fs.FileGetattrer).Getattr(ctx, out)
+	}
+
+	path := n.path()
+	var err error
+	s := syscall.Stat_t{}
+	if &n.Inode == n.Root() {
+		err = syscall.Stat(path, &s) // if we are looking for the root of FS
+	} else {
+		err = syscall.Lstat(path, &s) // if it's just a normal file/dir
+	}
+
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+
+	out.FromStat(&s) // no error getting attrs, fill them in out
+	return fs.OK
+}
+
+// opens a file for reading, and returns a filehandle
+// flags determines how we open the file (read only, read-write)
+func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fFlags uint32, errno syscall.Errno) {
+	flags = flags &^ syscall.O_APPEND // clears all bits in flags (1 to 0), for appending to end of file (&^ = AND NOT)
+	path := n.path()
+	file, err := syscall.Open(path, int(flags), 0) // try to open the file at path
+	if err != nil {
+		return nil, 0, fs.ToErrno(err)
+	}
+
+	lbFile := fs.NewLoopbackFile(file) // makes a filehandle
+	return lbFile, 0, 0
+
 }
 
 func main() {
