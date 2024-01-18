@@ -51,6 +51,10 @@ var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes o
 var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil))       // Creates a directory
 var _ = (fs.NodeUnlinker)((*OptiFSNode)(nil))      // Unlinks (deletes) a file
 var _ = (fs.NodeRmdirer)((*OptiFSNode)(nil))       // Unlinks (deletes) a directory
+var _ = (fs.NodeWriter)((*OptiFSNode)(nil))        // writes to a file
+var _ = (fs.NodeFlusher)((*OptiFSNode)(nil))       // Handles the closing of a Node
+var _ = (fs.NodeReleaser)((*OptiFSNode)(nil))      // Handles releasing a Node
+var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))       // Ensures that data is actually written to
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -171,6 +175,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.At
 // Opens a file for reading, and returns a filehandle
 // flags determines how we open the file (read only, read-write)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fFlags uint32, errno syscall.Errno) {
+	log.Println("ENTERED OPEN")
 	flags = flags &^ syscall.O_APPEND // Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
 	path := n.path()
 	fileDescriptor, err := syscall.Open(path, int(flags), 0) // try to open the file at path
@@ -257,9 +262,69 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 // Unlinks (removes) a directory
 func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	log.Printf("RMDIR performed on %v from node %v\n", name, n.path())
-    fp := filepath.Join(n.path(), name)
-    err := syscall.Rmdir(fp)
-    return fs.ToErrno(err)
+	fp := filepath.Join(n.path(), name)
+	err := syscall.Rmdir(fp)
+	return fs.ToErrno(err)
+}
+
+// takes in data to write to a file, beginning from a specified offset
+func (n *OptiFSNode) Write(ctx context.Context, fh fs.FileHandle, data []byte, offset int64) (uint32, syscall.Errno) {
+	log.Println("Attempting to write to file")
+	// if we have a filehandle, forward the write to it
+	if fh != nil {
+		return fh.(fs.FileWriter).Write(ctx, data, offset) /// check that its a file first
+	}
+
+	return 0, syscall.EBADFD
+
+	// // temp code, dont know how to get the file descriptor from open function implemented
+	// file, fErr := syscall.Open(n.path(), syscall.O_WRONLY, 0666) // open the file for writing, with the default permissions for a file
+	// if fErr != nil {
+	// 	return 0, fs.ToErrno(fErr) // no bytes written
+	// }
+
+	// // go to "offset" many bites from the start (0) of file
+	// _, sErr := syscall.Seek(file, offset, 0)
+	// if sErr != nil {
+	// 	return 0, fs.ToErrno(sErr) // no bytes written
+	// }
+
+	// written, wErr := syscall.Write(file, data) // write the data to the file
+	// if wErr != nil {
+	// 	return 0, fs.ToErrno(wErr) // no bytes written
+	// }
+
+	// return uint32(written), fs.OK
+
+}
+
+// Closes a node -> FORWARDS TO FILEHANDLE'S FLUSH
+func (n *OptiFSNode) Flush(ctx context.Context, fh fs.FileHandle) syscall.Errno {
+	log.Println("ENTERED FLUSH")
+	if fh != nil {
+		return fh.(fs.FileFlusher).Flush(ctx)
+	}
+
+	return syscall.EBADFD
+}
+
+// Releases a node -> FORWARDS TO FILEHANDLE'S RELEASE
+func (n *OptiFSNode) Release(ctx context.Context, fh fs.FileHandle) syscall.Errno {
+	log.Println("ENTERED RELEASE")
+	if fh != nil {
+		return fh.(fs.FileReleaser).Release(ctx)
+	}
+
+	return syscall.EBADFD
+}
+
+func (n *OptiFSNode) Fsync(ctx context.Context, fh fs.FileHandle, flags uint32) syscall.Errno {
+	log.Println("ENTERED FSYNC")
+	if fh != nil {
+		return fs.ToErrno(fh.(fs.FileFsyncer).Fsync(ctx, flags))
+	}
+
+	return syscall.EBADFD
 }
 
 func main() {
