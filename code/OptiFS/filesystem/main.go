@@ -42,7 +42,8 @@ var _ = (fs.InodeEmbedder)((*OptiFSNode)(nil))     // Inode
 var _ = (fs.NodeLookuper)((*OptiFSNode)(nil))      // lookup
 var _ = (fs.NodeOpendirer)((*OptiFSNode)(nil))     // opening directories
 var _ = (fs.NodeReaddirer)((*OptiFSNode)(nil))     // read directory
-var _ = (fs.NodeGetattrer)((*OptiFSNode)(nil))     // get attributes of a file/dir
+var _ = (fs.NodeGetattrer)((*OptiFSNode)(nil))     // get attributes of a node
+var _ = (fs.NodeSetattrer)((*OptiFSNode)(nil))     // Set attributes of a node
 var _ = (fs.NodeOpener)((*OptiFSNode)(nil))        // open a file
 var _ = (fs.NodeGetxattrer)((*OptiFSNode)(nil))    // Get extended attributes of a node
 var _ = (fs.NodeSetxattrer)((*OptiFSNode)(nil))    // Set extended attributes of a node
@@ -51,6 +52,11 @@ var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes o
 var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil))       // Creates a directory
 var _ = (fs.NodeUnlinker)((*OptiFSNode)(nil))      // Unlinks (deletes) a file
 var _ = (fs.NodeRmdirer)((*OptiFSNode)(nil))       // Unlinks (deletes) a directory
+var _ = (fs.NodeAccesser)((*OptiFSNode)(nil))      // Checks access of a node
+var _ = (fs.NodeWriter)((*OptiFSNode)(nil))        // Writes to a node
+var _ = (fs.NodeFlusher)((*OptiFSNode)(nil))       // Flush the node
+var _ = (fs.NodeReleaser)((*OptiFSNode)(nil))      // Releases a node
+var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))       // Ensures writes are actually written to disk
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -143,6 +149,7 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
 func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	log.Println("ENTERED GETATTR")
 	// if we have a file handle, use it to get the attributes
 	if fh != nil {
 		return fh.(fs.FileGetattrer).Getattr(ctx, out)
@@ -150,6 +157,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.At
 
 	// OTHERWISE get the node's attributes (stat the node)
 	path := n.path()
+	log.Printf("NO FILEHANDLE PASSED IN GETATTR, STATING %v INSTEAD\n", path)
 	var err error
 	s := syscall.Stat_t{}
 	// IF we're dealing with the root, stat it directly as opposed to handling symlinks
@@ -168,19 +176,108 @@ func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.At
 	return fs.OK
 }
 
+// Sets attributes of a node
+func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+    log.Println("ENTERED SETATTR")
+    
+    // If we have a file descriptor, use its setattr
+    if f != nil {
+        return f.(fs.FileSetattrer).Setattr(ctx, in, out)
+    }
+
+    // Manually change the attributes ourselves
+    path := n.path()
+
+    // If the mode needs to be changed
+    if mode, ok := in.GetMode(); ok {
+        // Change the mode to the new mode
+        if err := syscall.Chmod(path, mode); err != nil {
+            return fs.ToErrno(err)
+        }
+    }
+
+    // Try and get UID and GID
+    uid, uok := in.GetUID()
+    gid, gok := in.GetGID()
+    // If we have a UID or GID to set
+    if uok || gok {
+        // Set their default values to -1
+        // -1 indicates that the respective value shouldn't change
+        safeUID, safeGID := -1, -1
+        if uok {
+            safeUID = int(uid)
+        }
+        if gok {
+            safeGID = int(gid)
+        }
+        // Chown these values
+        err := syscall.Chown(path, safeUID, safeGID)
+        if err != nil {
+            return fs.ToErrno(err)
+        }
+    }
+
+    // Same thing for modification and access times
+    mtime, mok := in.GetMTime()
+    atime, aok := in.GetATime()
+    if mok || aok {
+        // Initialize pointers to the time values
+        ap := &atime
+        mp := &mtime
+        // Take into account if access of mod times are not both provided
+        if !aok {
+            ap = nil
+        }
+        if !mok {
+            mp = nil
+        }
+
+        // Create an array to hold timespec values for syscall
+        // This is a data structure that represents a time value
+        // with precision up to nanoseconds
+        var times [2]syscall.Timespec
+        times[0] = fuse.UtimeToTimespec(ap)
+        times[1] = fuse.UtimeToTimespec(mp)
+        // Call the utimenano syscall, ensuring to convert our time array
+        // into a slice, as it expects one
+        if err := syscall.UtimesNano(path, times[:]); err != nil {
+            return fs.ToErrno(err)
+		}
+    }
+
+    // If we have a size to update, do so as well
+    if size, ok := in.GetSize(); ok {
+        if err := syscall.Truncate(path, int64(size)); err != nil {
+            return fs.ToErrno(err)
+        }
+    }
+
+    // Now reflect these changes in the out stream
+    stat := syscall.Stat_t{}
+    err := syscall.Lstat(path, &stat) // respect symlinks with lstat
+    if err != nil {
+        return fs.ToErrno(err)
+    }
+    out.FromStat(&stat)
+
+    return fs.OK
+}
+
 // Opens a file for reading, and returns a filehandle
 // flags determines how we open the file (read only, read-write)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fFlags uint32, errno syscall.Errno) {
-	flags = flags &^ syscall.O_APPEND // Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
+	//flags = flags &^ syscall.O_APPEND // Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
+	log.Println("ENTERED OPEN")
 	path := n.path()
-	fileDescriptor, err := syscall.Open(path, int(flags), 0) // try to open the file at path
+	fileDescriptor, err := syscall.Open(path, int(flags), 0666) // try to open the file at path
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
 
 	// Creates a custom filehandle from the returned file descriptor from Open
 	lbFile := fs.NewLoopbackFile(fileDescriptor) // TODO: Implement with our own filehandle
-	return lbFile, 0, 0
+	log.Println("Created a new loopback file")
+	return lbFile, flags, fs.OK
 
 }
 
@@ -213,6 +310,12 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 	// Pass it down to the filesystem below
 	allAttributesSize, err := syscall.Listxattr(n.path(), dest)
 	return uint32(allAttributesSize), fs.ToErrno(err)
+}
+
+// Checks access of a node
+func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
+	log.Println("ENTERED ACCESS")
+	return fs.ToErrno(syscall.Access(n.path(), mask))
 }
 
 // Make a directory
@@ -257,9 +360,47 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 // Unlinks (removes) a directory
 func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	log.Printf("RMDIR performed on %v from node %v\n", name, n.path())
-    fp := filepath.Join(n.path(), name)
-    err := syscall.Rmdir(fp)
-    return fs.ToErrno(err)
+	fp := filepath.Join(n.path(), name)
+	err := syscall.Rmdir(fp)
+	return fs.ToErrno(err)
+}
+
+func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
+	log.Println("ENTERED WRITE")
+	if f != nil {
+		return f.(fs.FileWriter).Write(ctx, data, off)
+	}
+
+	log.Println("WRITE - EBADFD")
+	return 0, syscall.EBADFD
+}
+
+func (n *OptiFSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	log.Println("ENTERED FLUSH")
+	if f != nil {
+		return f.(fs.FileFlusher).Flush(ctx)
+	}
+	log.Println("FLUSH - EBADFD")
+	return syscall.EBADFD
+}
+
+// FUSE's version of a close
+func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	log.Println("ENTERED RELEASE")
+	if f != nil {
+		return f.(fs.FileReleaser).Release(ctx)
+	}
+	log.Println("RELEASE - EBADFD")
+	return syscall.EBADFD
+}
+
+func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
+	log.Println("ENTERED FSYNC")
+	if f != nil {
+		return f.(fs.FileFsyncer).Fsync(ctx, flags)
+	}
+	log.Println("FSYNC - EBADFD")
+	return syscall.EBADFD
 }
 
 func main() {
