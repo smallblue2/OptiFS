@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -36,6 +37,15 @@ type OptiFSNode struct {
 	RootNode *OptiFSRoot
 }
 
+// represents open files in the system, use for handling filehandles
+// introducing mutex's means that synchronous events can happen with no worry of safety
+type OptiFSFile struct {
+	mu sync.Mutex
+
+	// file descriptor for filehandling
+	fdesc int
+}
+
 // Interfaces/contracts to abide by
 var _ = (fs.NodeStatfser)((*OptiFSNode)(nil))      // StatFS
 var _ = (fs.InodeEmbedder)((*OptiFSNode)(nil))     // Inode
@@ -57,6 +67,29 @@ var _ = (fs.NodeWriter)((*OptiFSNode)(nil))        // Writes to a node
 var _ = (fs.NodeFlusher)((*OptiFSNode)(nil))       // Flush the node
 var _ = (fs.NodeReleaser)((*OptiFSNode)(nil))      // Releases a node
 var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))       // Ensures writes are actually written to disk
+
+// Interfaces for Filehandles
+var _ = (fs.FileHandle)((*OptiFSFile)(nil))
+var _ = (fs.FileReader)((*OptiFSFile)(nil)) // reading a file
+
+// makes a filehandle, to give more control over operations on files in the system
+// abstract reference to files, where the state of the file (open, offsets, reading etc) can be tracked
+func NewOptiFSFile(fdesc int) fs.FileHandle {
+	return &OptiFSFile{fdesc: fdesc}
+}
+
+// handles read operations (implements concurrency)
+func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.ReadResult, syscall.Errno) {
+	// lock the operation, and make sure it doesnt unlock until function is exited
+	// unlocks when function is exited
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// read a specific amount of data (dest) from a specific point (offset) in the file
+	read := fuse.ReadResultFd(uintptr(f.fdesc), offset, len(dest))
+
+	return read, fs.OK
+}
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -178,89 +211,89 @@ func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.At
 
 // Sets attributes of a node
 func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-    log.Println("ENTERED SETATTR")
-    
-    // If we have a file descriptor, use its setattr
-    if f != nil {
-        return f.(fs.FileSetattrer).Setattr(ctx, in, out)
-    }
+	log.Println("ENTERED SETATTR")
 
-    // Manually change the attributes ourselves
-    path := n.path()
+	// If we have a file descriptor, use its setattr
+	if f != nil {
+		return f.(fs.FileSetattrer).Setattr(ctx, in, out)
+	}
 
-    // If the mode needs to be changed
-    if mode, ok := in.GetMode(); ok {
-        // Change the mode to the new mode
-        if err := syscall.Chmod(path, mode); err != nil {
-            return fs.ToErrno(err)
-        }
-    }
+	// Manually change the attributes ourselves
+	path := n.path()
 
-    // Try and get UID and GID
-    uid, uok := in.GetUID()
-    gid, gok := in.GetGID()
-    // If we have a UID or GID to set
-    if uok || gok {
-        // Set their default values to -1
-        // -1 indicates that the respective value shouldn't change
-        safeUID, safeGID := -1, -1
-        if uok {
-            safeUID = int(uid)
-        }
-        if gok {
-            safeGID = int(gid)
-        }
-        // Chown these values
-        err := syscall.Chown(path, safeUID, safeGID)
-        if err != nil {
-            return fs.ToErrno(err)
-        }
-    }
-
-    // Same thing for modification and access times
-    mtime, mok := in.GetMTime()
-    atime, aok := in.GetATime()
-    if mok || aok {
-        // Initialize pointers to the time values
-        ap := &atime
-        mp := &mtime
-        // Take into account if access of mod times are not both provided
-        if !aok {
-            ap = nil
-        }
-        if !mok {
-            mp = nil
-        }
-
-        // Create an array to hold timespec values for syscall
-        // This is a data structure that represents a time value
-        // with precision up to nanoseconds
-        var times [2]syscall.Timespec
-        times[0] = fuse.UtimeToTimespec(ap)
-        times[1] = fuse.UtimeToTimespec(mp)
-        // Call the utimenano syscall, ensuring to convert our time array
-        // into a slice, as it expects one
-        if err := syscall.UtimesNano(path, times[:]); err != nil {
-            return fs.ToErrno(err)
+	// If the mode needs to be changed
+	if mode, ok := in.GetMode(); ok {
+		// Change the mode to the new mode
+		if err := syscall.Chmod(path, mode); err != nil {
+			return fs.ToErrno(err)
 		}
-    }
+	}
 
-    // If we have a size to update, do so as well
-    if size, ok := in.GetSize(); ok {
-        if err := syscall.Truncate(path, int64(size)); err != nil {
-            return fs.ToErrno(err)
-        }
-    }
+	// Try and get UID and GID
+	uid, uok := in.GetUID()
+	gid, gok := in.GetGID()
+	// If we have a UID or GID to set
+	if uok || gok {
+		// Set their default values to -1
+		// -1 indicates that the respective value shouldn't change
+		safeUID, safeGID := -1, -1
+		if uok {
+			safeUID = int(uid)
+		}
+		if gok {
+			safeGID = int(gid)
+		}
+		// Chown these values
+		err := syscall.Chown(path, safeUID, safeGID)
+		if err != nil {
+			return fs.ToErrno(err)
+		}
+	}
 
-    // Now reflect these changes in the out stream
-    stat := syscall.Stat_t{}
-    err := syscall.Lstat(path, &stat) // respect symlinks with lstat
-    if err != nil {
-        return fs.ToErrno(err)
-    }
-    out.FromStat(&stat)
+	// Same thing for modification and access times
+	mtime, mok := in.GetMTime()
+	atime, aok := in.GetATime()
+	if mok || aok {
+		// Initialize pointers to the time values
+		ap := &atime
+		mp := &mtime
+		// Take into account if access of mod times are not both provided
+		if !aok {
+			ap = nil
+		}
+		if !mok {
+			mp = nil
+		}
 
-    return fs.OK
+		// Create an array to hold timespec values for syscall
+		// This is a data structure that represents a time value
+		// with precision up to nanoseconds
+		var times [2]syscall.Timespec
+		times[0] = fuse.UtimeToTimespec(ap)
+		times[1] = fuse.UtimeToTimespec(mp)
+		// Call the utimenano syscall, ensuring to convert our time array
+		// into a slice, as it expects one
+		if err := syscall.UtimesNano(path, times[:]); err != nil {
+			return fs.ToErrno(err)
+		}
+	}
+
+	// If we have a size to update, do so as well
+	if size, ok := in.GetSize(); ok {
+		if err := syscall.Truncate(path, int64(size)); err != nil {
+			return fs.ToErrno(err)
+		}
+	}
+
+	// Now reflect these changes in the out stream
+	stat := syscall.Stat_t{}
+	err := syscall.Lstat(path, &stat) // respect symlinks with lstat
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+	out.FromStat(&stat)
+
+	return fs.OK
 }
 
 // Opens a file for reading, and returns a filehandle
