@@ -2,12 +2,13 @@ package node
 
 import (
 	"context"
+	"filesystem/file"
 	"log"
 	"path/filepath"
 	"syscall"
 
-	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 // Root for OptiFS
@@ -141,7 +142,7 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 
 // opens a stream of dir entries,
 func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	return fs.NewLoopbackDirStream(n.path()) // TODO: Implement ourselves maybe?
+	return fs.NewLoopbackDirStream(n.path())
 }
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
@@ -272,7 +273,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 	}
 
 	// Creates a custom filehandle from the returned file descriptor from Open
-	lbFile := fs.NewLoopbackFile(fileDescriptor) // TODO: Implement with our own filehandle
+	lbFile := file.NewOptiFSFile(fileDescriptor)
 	log.Println("Created a new loopback file")
 	return lbFile, flags, fs.OK
 
