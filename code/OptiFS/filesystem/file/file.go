@@ -2,9 +2,12 @@ package file
 
 import (
 	"context"
+	"log"
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"filesystem/hashing"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -17,6 +20,9 @@ type OptiFSFile struct {
 
 	// file descriptor for filehandling
 	fdesc int
+
+	// store the hash of the file
+	hashed []byte
 }
 
 // statuses used commonly throughout the system, to do with locks
@@ -182,6 +188,8 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 	defer f.mu.Unlock()
 	// pwrite writes to a filedescriptor from a given offset
 	numOfBytesWritten, err := syscall.Pwrite(f.fdesc, data, off)
+	log.Printf("Data Written: %v\n", data)
+	f.hashed = hashing.HashData(data)
 	return uint32(numOfBytesWritten), fs.ToErrno(err)
 }
 

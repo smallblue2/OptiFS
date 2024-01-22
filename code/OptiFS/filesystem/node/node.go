@@ -48,7 +48,7 @@ var _ = (fs.NodeSetxattrer)((*OptiFSNode)(nil))    // Set extended attributes of
 var _ = (fs.NodeRemovexattrer)((*OptiFSNode)(nil)) // Remove extended attributes of a node
 var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes of a node
 var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil))       // Creates a directory
-var _ = (fs.NodeCreater)((*OptiFSNode)(nil))       // makes a file
+var _ = (fs.NodeCreater)((*OptiFSNode)(nil))       // creates a file
 var _ = (fs.NodeUnlinker)((*OptiFSNode)(nil))      // Unlinks (deletes) a file
 var _ = (fs.NodeRmdirer)((*OptiFSNode)(nil))       // Unlinks (deletes) a directory
 var _ = (fs.NodeAccesser)((*OptiFSNode)(nil))      // Checks access of a node
@@ -278,9 +278,9 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	}
 
 	// Creates a custom filehandle from the returned file descriptor from Open
-	lbFile := file.NewOptiFSFile(fileDescriptor)
+	optiFile := file.NewOptiFSFile(fileDescriptor)
 	log.Println("Created a new loopback file")
-	return lbFile, flags, fs.OK
+	return optiFile, flags, fs.OK
 
 }
 
@@ -352,8 +352,25 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 	return x, fs.OK
 }
 
+func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
+	// make sure we are running as root user (root user id is 0)
+	if os.Getuid() != 0 {
+		return nil
+	}
+
+	person, check := fuse.FromContext(ctx) // get person's info
+	// if we werent able to get the info of the person who performed the operation
+	if !check {
+		return nil
+	}
+
+	// change the ownership of the file/dir to the UID and GID of the person
+	return syscall.Lchown(path, int(person.Uid), int(person.Gid))
+
+}
+
+// create a file that doesn't exist, also fills in the gid/uid of the user into the file attributes
 func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, f fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	log.Printf("In Create!")
 	fp := filepath.Join(n.path(), name) // create the path for the new file
 	flags = flags &^ syscall.O_APPEND   // Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
 
@@ -363,6 +380,8 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 	if err != nil {
 		return nil, nil, 0, fs.ToErrno(err)
 	}
+
+	n.setOwner(ctx, fp) // set who made the file
 
 	// stat the new file, making sure it was created
 	s := syscall.Stat_t{}
