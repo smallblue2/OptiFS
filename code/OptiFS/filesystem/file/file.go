@@ -251,7 +251,7 @@ func (f *OptiFSFile) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock,
 	}
 
 	// OFD_SETLK tries to get the lock on a file, if it can't, it will fail and return an error
-	// query the file lock status of the file descr
+	// query the status of the file descr
 	err := fs.ToErrno(syscall.FcntlFlock(uintptr(f.fdesc), _OFD_SETLK, &lock))
 
 	return err
@@ -282,7 +282,7 @@ func (f *OptiFSFile) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLock
 	}
 
 	// OFD_SETLKW tries to get the lock on a file, if it can't, it will wait for it to become available
-	// query the file lock status of the file descr
+	// query the status of the file descr
 	err := fs.ToErrno(syscall.FcntlFlock(uintptr(f.fdesc), _OFD_SETLKW, &lock))
 
 	return err

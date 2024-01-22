@@ -4,6 +4,7 @@ import (
 	"context"
 	"filesystem/file"
 	"log"
+	"os"
 	"path/filepath"
 	"syscall"
 
@@ -47,6 +48,7 @@ var _ = (fs.NodeSetxattrer)((*OptiFSNode)(nil))    // Set extended attributes of
 var _ = (fs.NodeRemovexattrer)((*OptiFSNode)(nil)) // Remove extended attributes of a node
 var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes of a node
 var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil))       // Creates a directory
+var _ = (fs.NodeCreater)((*OptiFSNode)(nil))       // makes a file
 var _ = (fs.NodeUnlinker)((*OptiFSNode)(nil))      // Unlinks (deletes) a file
 var _ = (fs.NodeRmdirer)((*OptiFSNode)(nil))       // Unlinks (deletes) a directory
 var _ = (fs.NodeAccesser)((*OptiFSNode)(nil))      // Checks access of a node
@@ -54,7 +56,9 @@ var _ = (fs.NodeWriter)((*OptiFSNode)(nil))        // Writes to a node
 var _ = (fs.NodeFlusher)((*OptiFSNode)(nil))       // Flush the node
 var _ = (fs.NodeReleaser)((*OptiFSNode)(nil))      // Releases a node
 var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))       // Ensures writes are actually written to disk
-
+var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))       // find conflicting locks for given lock
+var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))       // gets a lock on a node
+var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil))      // gets a lock on a node, waits for it to be ready
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -146,11 +150,11 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 }
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
-func (n *OptiFSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	log.Println("ENTERED GETATTR")
 	// if we have a file handle, use it to get the attributes
-	if fh != nil {
-		return fh.(fs.FileGetattrer).Getattr(ctx, out)
+	if f != nil {
+		return f.(fs.FileGetattrer).Getattr(ctx, out)
 	}
 
 	// OTHERWISE get the node's attributes (stat the node)
@@ -263,8 +267,9 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 // Opens a file for reading, and returns a filehandle
 // flags determines how we open the file (read only, read-write)
-func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fFlags uint32, errno syscall.Errno) {
-	//flags = flags &^ syscall.O_APPEND // Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
+func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, fFlags uint32, errno syscall.Errno) {
+	flags = flags &^ syscall.O_APPEND
+	// Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
 	log.Println("ENTERED OPEN")
 	path := n.path()
 	fileDescriptor, err := syscall.Open(path, int(flags), 0666) // try to open the file at path
@@ -347,6 +352,41 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 	return x, fs.OK
 }
 
+func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, f fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	log.Printf("In Create!")
+	fp := filepath.Join(n.path(), name) // create the path for the new file
+	flags = flags &^ syscall.O_APPEND   // Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
+
+	// try to open the file, OR create if theres no file to open
+	fdesc, err := syscall.Open(fp, int(flags)|os.O_CREATE, mode)
+
+	if err != nil {
+		return nil, nil, 0, fs.ToErrno(err)
+	}
+
+	// stat the new file, making sure it was created
+	s := syscall.Stat_t{}
+	fErr := syscall.Fstat(fdesc, &s)
+	if fErr != nil {
+		syscall.Close(fdesc) // close the file descr
+		return nil, nil, 0, fs.ToErrno(err)
+	}
+
+	// Create a new node to represent the underlying looked up file
+	// or directory in our VFS
+	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &s)
+
+	// Create the inode structure within FUSE, copying the underlying
+	// file's attributes with an auto generated inode in idFromStat
+	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
+
+	newFile := file.NewOptiFSFile(fdesc) // make filehandle for file operations
+
+	out.FromStat(&s) // fill out info
+
+	return x, newFile, 0, fs.OK
+}
+
 // Unlinks (removes) a file
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	log.Printf("UNLINK performed on %v from node %v\n", name, n.path())
@@ -370,7 +410,7 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 	}
 
 	log.Println("WRITE - EBADFD")
-	return 0, syscall.EBADFD
+	return 0, syscall.EBADFD // bad file descriptor
 }
 
 func (n *OptiFSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
@@ -379,7 +419,7 @@ func (n *OptiFSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		return f.(fs.FileFlusher).Flush(ctx)
 	}
 	log.Println("FLUSH - EBADFD")
-	return syscall.EBADFD
+	return syscall.EBADFD // bad file descriptor
 }
 
 // FUSE's version of a close
@@ -389,7 +429,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 		return f.(fs.FileReleaser).Release(ctx)
 	}
 	log.Println("RELEASE - EBADFD")
-	return syscall.EBADFD
+	return syscall.EBADFD // bad file descriptor
 }
 
 func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
@@ -398,6 +438,33 @@ func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) s
 		return f.(fs.FileFsyncer).Fsync(ctx, flags)
 	}
 	log.Println("FSYNC - EBADFD")
-	return syscall.EBADFD
+	return syscall.EBADFD // bad file descriptor
 }
 
+// gets the status' of locks on a node by passing it to the filehandle
+func (n *OptiFSNode) Getlk(ctx context.Context, f fs.FileHandle, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) syscall.Errno {
+	if f != nil {
+		return f.(fs.FileGetlker).Getlk(ctx, owner, lk, flags, out) // send it if filehandle exists
+	}
+	log.Println("GETLK - EBADFD")
+	return syscall.EBADFD // bad file descriptor
+}
+
+// gets a lock on a node by passing it to the filehandle, if it can't get the lock it fails
+func (n *OptiFSNode) Setlk(ctx context.Context, f fs.FileHandle, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
+	if f != nil {
+		return f.(fs.FileSetlker).Setlk(ctx, owner, lk, flags) // send it if filehandle exists
+	}
+	log.Println("SETLK - EBADFD")
+	return syscall.EBADFD // bad file descriptor
+}
+
+// gets a lock on a node by passing it to the filehandle
+// if it can't get the lock then it waits for the lock to be obtainable
+func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
+	if f != nil {
+		return f.(fs.FileSetlkwer).Setlkw(ctx, owner, lk, flags) // send it if filehandle exists
+	}
+	log.Println("SETLKW - EBADFD")
+	return syscall.EBADFD // bad file descriptor
+}
