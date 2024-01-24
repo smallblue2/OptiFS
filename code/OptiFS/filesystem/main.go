@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 
+	"filesystem/hashing"
 	"filesystem/node"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -47,10 +48,17 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
+	hashing.RetrieveMap() // retrieve the hashmap
+
 	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
 	log.Printf("DEBUG: %v", options.Debug)
 	log.Println("=========================================================")
 	server.Wait()
+
+	// when we are shutting down the filesystem, save the hashmap
+	defer func() {
+		hashing.SaveMap(hashing.FileHashes)
+	}()
 
 }

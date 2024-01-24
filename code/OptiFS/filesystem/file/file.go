@@ -189,6 +189,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 	// pwrite writes to a filedescriptor from a given offset
 	numOfBytesWritten, err := syscall.Pwrite(f.fdesc, data, off)
 	log.Printf("Data Written: %v\n", data)
+	log.Printf("The String: %v\n", string(data[:]))
 	f.hashed = hashing.HashData(data)
 	return uint32(numOfBytesWritten), fs.ToErrno(err)
 }
