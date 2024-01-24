@@ -58,6 +58,7 @@ func main() {
 
 	// when we are shutting down the filesystem, save the hashmap
 	defer func() {
+		hashing.PrintMap()
 		hashing.SaveMap(hashing.FileHashes)
 	}()
 

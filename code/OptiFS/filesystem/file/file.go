@@ -3,6 +3,7 @@ package file
 import (
 	"context"
 	"log"
+	"strconv"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -12,6 +13,11 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
+
+// provides the functionality to get the inode number (import loop prevents this).
+type InodeProvider interface {
+	GetInode() uint64
+}
 
 // represents open files in the system, use for handling filehandles
 // introducing mutex's means that synchronous events can happen with no worry of safety
@@ -23,6 +29,9 @@ type OptiFSFile struct {
 
 	// store the hash of the file
 	hashed []byte
+
+	// inode of the file (for hashing purposes [key])
+	inodeProvider InodeProvider
 }
 
 // statuses used commonly throughout the system, to do with locks
@@ -190,7 +199,13 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 	numOfBytesWritten, err := syscall.Pwrite(f.fdesc, data, off)
 	log.Printf("Data Written: %v\n", data)
 	log.Printf("The String: %v\n", string(data[:]))
-	f.hashed = hashing.HashData(data)
+
+	f.hashed = hashing.HashData(data)     // hash the data and store the hash
+	ino := f.inodeProvider.GetInode()     // get the inode number for the file
+	inoStr := strconv.FormatUint(ino, 10) // convert inode into a string
+	log.Printf("INODE STRING: %v\n", inoStr)
+	hashing.FileHashes[inoStr] = f.hashed // put the k, v pair into the hashmap
+
 	return uint32(numOfBytesWritten), fs.ToErrno(err)
 }
 

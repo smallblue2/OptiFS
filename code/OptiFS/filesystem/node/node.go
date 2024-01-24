@@ -109,6 +109,12 @@ func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
 	}
 }
 
+// get the inode number for the file hashing
+func (n *OptiFSNode) GetInode() uint64 {
+	attr := n.StableAttr()
+	return attr.Ino
+}
+
 // lookup finds a file/directory based on its name
 func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	log.Printf("LOOKUP performed for %v from node %v\n", name, n.path())

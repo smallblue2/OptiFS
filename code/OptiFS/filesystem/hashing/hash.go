@@ -29,7 +29,9 @@ func HashData(data []byte) []byte {
 	return hashResult[:]
 }
 
-// lookup func (isunique)
+// TODO: lookup func (isunique)
+// TODO: figure out key to hashmap?? (hash is value)
+// TODO: hash evey file already in the system
 
 // since a hashmap will be deleted when the system is restarted (stored in RAM)
 // we encode the hashmap and store it in a file saved on disk to be loaded when OptiFS starts
@@ -81,4 +83,12 @@ func RetrieveMap() error {
 	}
 
 	return nil
+}
+
+// printing hashmap for testing purposes
+func PrintMap() {
+	log.Println("PRINTING HASHMAP")
+	for key, value := range FileHashes {
+		log.Printf("Key: %s, Value: %x\n", key, value)
+	}
 }
