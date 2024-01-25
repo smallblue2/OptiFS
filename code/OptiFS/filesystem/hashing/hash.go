@@ -16,6 +16,8 @@ import (
 // if hash's are the same, don't save the write, update reference count
 // if they are different, proceed as normal
 
+// key = inode number
+// value = hash
 var FileHashes = make(map[string][]byte)
 
 func HashData(data []byte) []byte {
@@ -26,11 +28,14 @@ func HashData(data []byte) []byte {
 	// need to use %x to format each byte as a hex string
 	fmt.Printf("Hash of that string: %x\n", hashResult)
 
+	// finalHash := string(hashResult[:]) // needs to be stored as a string for the hashmap
+
+	// log.Printf("Hash Converted to string: %v\n", finalHash) // issue!!!!
+
 	return hashResult[:]
 }
 
 // TODO: lookup func (isunique)
-// TODO: figure out key to hashmap?? (hash is value)
 // TODO: hash evey file already in the system
 
 // since a hashmap will be deleted when the system is restarted (stored in RAM)
@@ -89,6 +94,6 @@ func RetrieveMap() error {
 func PrintMap() {
 	log.Println("PRINTING HASHMAP")
 	for key, value := range FileHashes {
-		log.Printf("Key: %s, Value: %x\n", key, value)
+		log.Printf("Key: %v, Value: %x\n", key, value)
 	}
 }

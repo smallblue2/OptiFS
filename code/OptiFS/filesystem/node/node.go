@@ -284,7 +284,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	}
 
 	// Creates a custom filehandle from the returned file descriptor from Open
-	optiFile := file.NewOptiFSFile(fileDescriptor)
+	optiFile := file.NewOptiFSFile(fileDescriptor, n.GetInode())
 	log.Println("Created a new loopback file")
 	return optiFile, flags, fs.OK
 
@@ -405,7 +405,7 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 	// file's attributes with an auto generated inode in idFromStat
 	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
 
-	newFile := file.NewOptiFSFile(fdesc) // make filehandle for file operations
+	newFile := file.NewOptiFSFile(fdesc, n.GetInode()) // make filehandle for file operations
 
 	out.FromStat(&s) // fill out info
 
@@ -432,6 +432,8 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 	log.Println("ENTERED WRITE")
 	if f != nil {
 		return f.(fs.FileWriter).Write(ctx, data, off)
+		// result, err := f.(fs.FileWriter).Write(ctx, data, off)
+		// hashing.FileHashes[GetInode()] =
 	}
 
 	log.Println("WRITE - EBADFD")

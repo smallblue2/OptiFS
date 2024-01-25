@@ -2,22 +2,16 @@ package file
 
 import (
 	"context"
+	"filesystem/hashing"
 	"log"
 	"strconv"
 	"sync"
 	"syscall"
 	"unsafe"
 
-	"filesystem/hashing"
-
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
-
-// provides the functionality to get the inode number (import loop prevents this).
-type InodeProvider interface {
-	GetInode() uint64
-}
 
 // represents open files in the system, use for handling filehandles
 // introducing mutex's means that synchronous events can happen with no worry of safety
@@ -31,7 +25,7 @@ type OptiFSFile struct {
 	hashed []byte
 
 	// inode of the file (for hashing purposes [key])
-	inodeProvider InodeProvider
+	inode uint64
 }
 
 // statuses used commonly throughout the system, to do with locks
@@ -57,8 +51,9 @@ var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil))  // gets a lock on a file, waits f
 // makes a filehandle, to give more control over operations on files in the system
 // abstract reference to files, where the state of the file (open, offsets, reading etc)
 // can be tracked
-func NewOptiFSFile(fdesc int) fs.FileHandle {
-	return &OptiFSFile{fdesc: fdesc}
+func NewOptiFSFile(fdesc int, inode uint64) fs.FileHandle {
+	log.Println("NEW OPTIFSFILE CREATED")
+	return &OptiFSFile{fdesc: fdesc, inode: inode}
 }
 
 // handles read operations (implements concurrency)
@@ -200,11 +195,10 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 	log.Printf("Data Written: %v\n", data)
 	log.Printf("The String: %v\n", string(data[:]))
 
-	f.hashed = hashing.HashData(data)     // hash the data and store the hash
-	ino := f.inodeProvider.GetInode()     // get the inode number for the file
-	inoStr := strconv.FormatUint(ino, 10) // convert inode into a string
-	log.Printf("INODE STRING: %v\n", inoStr)
-	hashing.FileHashes[inoStr] = f.hashed // put the k, v pair into the hashmap
+	f.hashed = hashing.HashData(data) // hash the data and store the hash
+	log.Printf("INODE: %v\n", f.inode)
+
+	hashing.FileHashes[strconv.FormatUint(f.inode, 10)] = f.hashed // put the k, v pair into the hashmap
 
 	return uint32(numOfBytesWritten), fs.ToErrno(err)
 }
