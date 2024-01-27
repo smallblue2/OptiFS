@@ -124,7 +124,7 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	err := syscall.Lstat(fp, &s)        // gets the file attributes (also returns attrs of symbolic link)
 
 	if err != nil {
-		log.Println("LOOKUP FAILED!")
+        //log.Println("LOOKUP FAILED!")
 		return nil, fs.ToErrno(err)
 	}
 
@@ -275,7 +275,6 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 // Opens a file for reading, and returns a filehandle
 // flags determines how we open the file (read only, read-write)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, fFlags uint32, errno syscall.Errno) {
-	flags = flags &^ syscall.O_APPEND
 	// Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
 	log.Println("ENTERED OPEN")
 	path := n.path()
@@ -285,7 +284,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	}
 
 	// Creates a custom filehandle from the returned file descriptor from Open
-	optiFile := file.NewOptiFSFile(fileDescriptor, n.GetInode())
+	optiFile := file.NewOptiFSFile(fileDescriptor, n.GetInode(), flags)
 	log.Println("Created a new loopback file")
 	return optiFile, flags, fs.OK
 
@@ -379,7 +378,6 @@ func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
 // create a file that doesn't exist, also fills in the gid/uid of the user into the file attributes
 func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, f fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	fp := filepath.Join(n.path(), name) // create the path for the new file
-	flags = flags &^ syscall.O_APPEND   // Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
 
 	// try to open the file, OR create if theres no file to open
 	fdesc, err := syscall.Open(fp, int(flags)|os.O_CREATE, mode)
@@ -406,7 +404,7 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 	// file's attributes with an auto generated inode in idFromStat
 	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
 
-	newFile := file.NewOptiFSFile(fdesc, n.GetInode()) // make filehandle for file operations
+	newFile := file.NewOptiFSFile(fdesc, n.GetInode(), flags) // make filehandle for file operations
 
 	out.FromStat(&s) // fill out info
 

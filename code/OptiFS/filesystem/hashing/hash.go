@@ -2,9 +2,9 @@ package hashing
 
 import (
 	"encoding/gob"
-	"fmt"
 	"log"
 	"os"
+	"syscall"
 
 	"lukechampine.com/blake3"
 )
@@ -20,13 +20,29 @@ import (
 // value = hash
 var FileHashes = make(map[[64]byte]uint64)
 
-func HashData(data []byte) [64]byte {
+func HashData(data []byte, flags uint32) [64]byte {
+
+    // Check to see if we're appending
+    if flags&syscall.O_APPEND != 0 {
+        log.Println("APPENDING")
+    }
+    if flags&syscall.O_RDWR != 0 {
+        log.Println("READWRITING")
+    }
+    if flags&syscall.O_WRONLY != 0 {
+        log.Println("WRITINGONLY")
+    }
+    if flags&syscall.O_TRUNC != 0 {
+        log.Println("TRUNCATING")
+    }
+    if flags&syscall.O_CREAT != 0 {
+        log.Println("CREATING")
+    }
 
 	// get the hash
 	hashResult := blake3.Sum512(data)
 
-	// need to use %x to format each byte as a hex string
-	fmt.Printf("Hash of that string: %x\n", hashResult)
+    log.Printf("HASHING: %s\nHASH: %x\n", string(data), hashResult)
 
 	// finalHash := string(hashResult[:]) // needs to be stored as a string for the hashmap
 

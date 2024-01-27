@@ -25,6 +25,9 @@ type OptiFSFile struct {
 
 	// inode of the file (for hashing purposes [key])
 	inode uint64
+
+    // The flags of the file (OAPPEND, RWONLY, etc...)
+    flags uint32
 }
 
 // statuses used commonly throughout the system, to do with locks
@@ -50,9 +53,9 @@ var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil))  // gets a lock on a file, waits f
 // makes a filehandle, to give more control over operations on files in the system
 // abstract reference to files, where the state of the file (open, offsets, reading etc)
 // can be tracked
-func NewOptiFSFile(fdesc int, inode uint64) fs.FileHandle {
+func NewOptiFSFile(fdesc int, inode uint64, flags uint32) fs.FileHandle {
 	log.Println("NEW OPTIFSFILE CREATED")
-	return &OptiFSFile{fdesc: fdesc, inode: inode}
+    return &OptiFSFile{fdesc: fdesc, inode: inode, flags: flags}
 }
 
 // handles read operations (implements concurrency)
@@ -191,10 +194,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 	defer f.mu.Unlock()
 	// pwrite writes to a filedescriptor from a given offset
 	numOfBytesWritten, err := syscall.Pwrite(f.fdesc, data, off)
-	log.Printf("Data Written: %v\n", data)
-    log.Printf("The String: %v\n", string(data))
-
-	f.hashed = hashing.HashData(data) // hash the data and store the hash
+	f.hashed = hashing.HashData(data, f.flags) // hash the data and store the hash
 	log.Printf("INODE: %v\n", f.inode)
 
 	hashing.FileHashes[f.hashed] = f.inode // put the k, v pair into the hashmap
