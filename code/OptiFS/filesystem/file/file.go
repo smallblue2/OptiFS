@@ -4,7 +4,6 @@ import (
 	"context"
 	"filesystem/hashing"
 	"log"
-	"strconv"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -21,8 +20,8 @@ type OptiFSFile struct {
 	// file descriptor for filehandling
 	fdesc int
 
-	// store the hash of the file
-	hashed []byte
+	// store the hash of the file content
+	hashed [64]byte
 
 	// inode of the file (for hashing purposes [key])
 	inode uint64
@@ -193,12 +192,12 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 	// pwrite writes to a filedescriptor from a given offset
 	numOfBytesWritten, err := syscall.Pwrite(f.fdesc, data, off)
 	log.Printf("Data Written: %v\n", data)
-	log.Printf("The String: %v\n", string(data[:]))
+    log.Printf("The String: %v\n", string(data))
 
 	f.hashed = hashing.HashData(data) // hash the data and store the hash
 	log.Printf("INODE: %v\n", f.inode)
 
-	hashing.FileHashes[strconv.FormatUint(f.inode, 10)] = f.hashed // put the k, v pair into the hashmap
+	hashing.FileHashes[f.hashed] = f.inode // put the k, v pair into the hashmap
 
 	return uint32(numOfBytesWritten), fs.ToErrno(err)
 }

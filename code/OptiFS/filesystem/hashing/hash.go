@@ -18,9 +18,9 @@ import (
 
 // key = inode number
 // value = hash
-var FileHashes = make(map[string][]byte)
+var FileHashes = make(map[[64]byte]uint64)
 
-func HashData(data []byte) []byte {
+func HashData(data []byte) [64]byte {
 
 	// get the hash
 	hashResult := blake3.Sum512(data)
@@ -32,7 +32,7 @@ func HashData(data []byte) []byte {
 
 	// log.Printf("Hash Converted to string: %v\n", finalHash) // issue!!!!
 
-	return hashResult[:]
+	return hashResult
 }
 
 // TODO: lookup func (isunique)
@@ -40,7 +40,7 @@ func HashData(data []byte) []byte {
 
 // since a hashmap will be deleted when the system is restarted (stored in RAM)
 // we encode the hashmap and store it in a file saved on disk to be loaded when OptiFS starts
-func SaveMap(hashmap map[string][]byte) error {
+func SaveMap(hashmap map[[64]byte]uint64) error {
 	log.Println("SAVING HASHMAP")
 	dest := "hashing/OptiFSHashSave.gob"
 

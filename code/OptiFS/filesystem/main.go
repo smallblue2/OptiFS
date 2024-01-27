@@ -54,12 +54,13 @@ func main() {
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
 	log.Printf("DEBUG: %v", options.Debug)
 	log.Println("=========================================================")
-	server.Wait()
 
 	// when we are shutting down the filesystem, save the hashmap
 	defer func() {
-		hashing.PrintMap()
-		hashing.SaveMap(hashing.FileHashes)
+        hashing.PrintMap()
+        hashing.SaveMap(hashing.FileHashes)
 	}()
 
+
+	server.Wait()
 }
