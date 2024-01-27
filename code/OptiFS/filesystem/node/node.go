@@ -59,6 +59,7 @@ var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))       // Ensures writes are actuall
 var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))       // find conflicting locks for given lock
 var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))       // gets a lock on a node
 var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil))      // gets a lock on a node, waits for it to be ready
+var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))       // rename a file (move)
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -494,4 +495,16 @@ func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, 
 	}
 	log.Println("SETLKW - EBADFD")
 	return syscall.EBADFD // bad file descriptor
+}
+
+// TODO: locks
+func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+
+	oldPath := filepath.Join(n.path(), name)
+	// the root of the system + the path of the node (as far back as it can go) + the name of the file
+	newPath := filepath.Join(n.RootNode.Path, n.EmbeddedInode().Path(nil), newName)
+
+	err := syscall.Rename(oldPath, newPath)
+
+	return fs.ToErrno(err)
 }
