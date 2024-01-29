@@ -110,6 +110,6 @@ func RetrieveMap() error {
 func PrintMap() {
 	log.Println("PRINTING HASHMAP")
 	for key, value := range FileHashes {
-		log.Printf("Key: %v, Value: %x\n", key, value)
+		log.Printf("Key: %x, Value: %v\n", key, value)
 	}
 }
