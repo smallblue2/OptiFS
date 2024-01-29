@@ -5,7 +5,7 @@ package file
 import (
 	"context"
 	"filesystem/hashing"
-	"log"
+	//"log"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -56,7 +56,7 @@ var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil))  // gets a lock on a file, waits f
 // abstract reference to files, where the state of the file (open, offsets, reading etc)
 // can be tracked
 func NewOptiFSFile(fdesc int, inode uint64, flags uint32) fs.FileHandle {
-	log.Println("NEW OPTIFSFILE CREATED")
+	//log.Println("NEW OPTIFSFILE CREATED")
     return &OptiFSFile{fdesc: fdesc, inode: inode, flags: flags}
 }
 
@@ -197,7 +197,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 	// pwrite writes to a filedescriptor from a given offset
 	numOfBytesWritten, err := syscall.Pwrite(f.fdesc, data, off)
 	f.hashed = hashing.HashData(data, f.flags) // hash the data and store the hash
-	log.Printf("INODE: %v\n", f.inode)
+	//log.Printf("INODE: %v\n", f.inode)
 
 	hashing.FileHashes[f.hashed] = f.inode // put the k, v pair into the hashmap
 

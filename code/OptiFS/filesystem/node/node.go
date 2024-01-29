@@ -3,14 +3,14 @@ package node
 import (
 	"context"
 	"filesystem/file"
-	"log"
+	//"log"
 	"os"
 	"path/filepath"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-    "golang.org/x/sys/unix"
+	"golang.org/x/sys/unix"
 )
 
 // Root for OptiFS
@@ -60,7 +60,8 @@ var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))       // Ensures writes are actuall
 var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))       // find conflicting locks for given lock
 var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))       // gets a lock on a node
 var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil))      // gets a lock on a node, waits for it to be ready
-var _ = (fs.NodeRenamer)((*OptiFSNode)(nil)) // Changes the directory a node is in
+var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))       // Changes the directory a node is in
+var _ = (fs.NodeMknoder)((*OptiFSNode)(nil))       // Similar to lookup, but creates the inode
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -117,20 +118,21 @@ func (n *OptiFSNode) GetInode() uint64 {
 	return attr.Ino
 }
 
-// lookup finds a file/directory based on its name
+// lookup FINDS A NODE based on its name
 func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	log.Printf("LOOKUP performed for %v from node %v\n", name, n.path())
-	fp := filepath.Join(n.path(), name) // getting the full path to the file (join name to path)
+	//log.Printf("LOOKUP performed for %v from node %v\n", name, n.path())
+	filePath := filepath.Join(n.path(), name) // getting the full path to the file (join name to path)
 	s := syscall.Stat_t{}               // status of a file
-	err := syscall.Lstat(fp, &s)        // gets the file attributes (also returns attrs of symbolic link)
+	err := syscall.Lstat(filePath, &s)        // gets the file attributes (also returns attrs of symbolic link)
 
 	if err != nil {
-        //log.Println("LOOKUP FAILED!")
+		////log.Println("LOOKUP FAILED!")
 		return nil, fs.ToErrno(err)
 	}
 
 	// Fill the output attributes from out stat struct
 	out.Attr.FromStat(&s)
+
 	// Create a new node to represent the underlying looked up file
 	// or directory in our VFS
 	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &s)
@@ -159,7 +161,7 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
 func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	log.Println("1. ENTERED GETATTR")
+	//log.Println("1. ENTERED GETATTR")
 	// if we have a file handle, use it to get the attributes
 	if f != nil {
 		return f.(fs.FileGetattrer).Getattr(ctx, out)
@@ -167,33 +169,33 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 
 	// OTHERWISE get the node's attributes (stat the node)
 	path := n.path()
-	log.Printf("2. NO FILEHANDLE PASSED IN GETATTR, STATING %v INSTEAD\n", path)
+	//log.Printf("2. NO FILEHANDLE PASSED IN GETATTR, STATING %v INSTEAD\n", path)
 	var err error
 	s := syscall.Stat_t{}
 	// IF we're dealing with the root, stat it directly as opposed to handling symlinks
 	if &n.Inode == n.Root() {
 		err = syscall.Stat(path, &s) // if we are looking for the root of FS
-        log.Println("3. Statted the root of the FS")
+		//log.Println("3. Statted the root of the FS")
 	} else {
 		// Otherwise, use Lstat to handle symlinks as well as normal files/directories
 		err = syscall.Lstat(path, &s) // if it's just a normal file/dir
-        log.Println("3. Lstatted the file path")
+		//log.Println("3. Lstatted the file path")
 	}
 
 	if err != nil {
-        log.Println("3.1 ERROR STATTING")
+		//log.Println("3.1 ERROR STATTING")
 		return fs.ToErrno(err)
 	}
 
-    log.Println("4. Filled the stat struct")
+	//log.Println("4. Filled the stat struct")
 	out.FromStat(&s) // no error getting attrs, fill them in out
-    log.Println("5. OK")
+	//log.Println("5. OK")
 	return fs.OK
 }
 
 // Sets attributes of a node
 func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	log.Println("ENTERED SETATTR")
+	//log.Println("ENTERED SETATTR")
 
 	// If we have a file descriptor, use its setattr
 	if f != nil {
@@ -282,7 +284,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 // flags determines how we open the file (read only, read-write, etc...)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, fFlags uint32, errno syscall.Errno) {
 	// Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
-	log.Println("ENTERED OPEN")
+	//log.Println("ENTERED OPEN")
 	path := n.path()
 	fileDescriptor, err := syscall.Open(path, int(flags), 0666) // try to open the file at path
 	if err != nil {
@@ -291,14 +293,14 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 
 	// Creates a custom filehandle from the returned file descriptor from Open
 	optiFile := file.NewOptiFSFile(fileDescriptor, n.GetInode(), flags)
-	log.Println("Created a new loopback file")
+	//log.Println("Created a new loopback file")
 	return optiFile, flags, fs.OK
 
 }
 
 // Get EXTENDED attribute
 func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
-	log.Println("ENTERED GETXATTR")
+	//log.Println("ENTERED GETXATTR")
 	// Pass it down to the filesystem below
 	attributeSize, err := syscall.Getxattr(n.path(), attr, dest)
 	return uint32(attributeSize), fs.ToErrno(err)
@@ -306,7 +308,7 @@ func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (ui
 
 // Set EXTENDED attribute
 func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
-	log.Println("ENTERED SETXATTR")
+	//log.Println("ENTERED SETXATTR")
 	// Pass it down to the filesystem below
 	err := syscall.Setxattr(n.path(), attr, data, int(flags))
 	return fs.ToErrno(err)
@@ -314,14 +316,14 @@ func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, fla
 
 // Remove EXTENDED attribute
 func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
-	log.Println("ENTERED REMOVEXATTR")
+	//log.Println("ENTERED REMOVEXATTR")
 	err := syscall.Removexattr(n.path(), attr)
 	return fs.ToErrno(err)
 }
 
 // List EXTENDED attributes
 func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
-	log.Println("ENTERED LISTXATTR")
+	//log.Println("ENTERED LISTXATTR")
 	// Pass it down to the filesystem below
 	allAttributesSize, err := syscall.Listxattr(n.path(), dest)
 	return uint32(allAttributesSize), fs.ToErrno(err)
@@ -329,23 +331,23 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 
 // Checks access of a node
 func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
-	log.Println("ENTERED ACCESS")
+	//log.Println("ENTERED ACCESS")
 	return fs.ToErrno(syscall.Access(n.path(), mask))
 }
 
 // Make a directory
 func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	log.Println("ENTERED MKDIR")
+	//log.Println("ENTERED MKDIR")
 	// Create the directory
-	fp := filepath.Join(n.path(), name)
-	err := syscall.Mkdir(fp, mode)
+	filePath := filepath.Join(n.path(), name)
+	err := syscall.Mkdir(filePath, mode)
 	if err != nil {
 		return nil, fs.ToErrno(err)
 	}
 
 	// Now stat the new directory, ensuring it was created
 	var directoryStatus syscall.Stat_t
-	err = syscall.Stat(fp, &directoryStatus)
+	err = syscall.Stat(filePath, &directoryStatus)
 	if err != nil {
 		return nil, fs.ToErrno(err)
 	}
@@ -381,18 +383,18 @@ func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
 
 }
 
-// create a file that doesn't exist, also fills in the gid/uid of the user into the file attributes
+// create a REGULAR FILE that doesn't exist, also fills in the gid/uid of the user into the file attributes
 func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, f fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	fp := filepath.Join(n.path(), name) // create the path for the new file
+	filePath := filepath.Join(n.path(), name) // create the path for the new file
 
 	// try to open the file, OR create if theres no file to open
-	fdesc, err := syscall.Open(fp, int(flags)|os.O_CREATE, mode)
+	fdesc, err := syscall.Open(filePath, int(flags)|os.O_CREATE, mode)
 
 	if err != nil {
 		return nil, nil, 0, fs.ToErrno(err)
 	}
 
-	n.setOwner(ctx, fp) // set who made the file
+	n.setOwner(ctx, filePath) // set who made the file
 
 	// stat the new file, making sure it was created
 	s := syscall.Stat_t{}
@@ -419,57 +421,57 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 
 // Unlinks (removes) a file
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
-	log.Printf("UNLINK performed on %v from node %v\n", name, n.path())
-	fp := filepath.Join(n.path(), name)
-	err := syscall.Unlink(fp)
+	//log.Printf("UNLINK performed on %v from node %v\n", name, n.path())
+	filePath := filepath.Join(n.path(), name)
+	err := syscall.Unlink(filePath)
 	return fs.ToErrno(err)
 }
 
 // Unlinks (removes) a directory
 func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
-	log.Printf("RMDIR performed on %v from node %v\n", name, n.path())
-	fp := filepath.Join(n.path(), name)
-	err := syscall.Rmdir(fp)
+	//log.Printf("RMDIR performed on %v from node %v\n", name, n.path())
+	filePath := filepath.Join(n.path(), name)
+	err := syscall.Rmdir(filePath)
 	return fs.ToErrno(err)
 }
 
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	log.Println("ENTERED WRITE")
+	//log.Println("ENTERED WRITE")
 	if f != nil {
 		return f.(fs.FileWriter).Write(ctx, data, off)
 		// result, err := f.(fs.FileWriter).Write(ctx, data, off)
 		// hashing.FileHashes[GetInode()] =
 	}
 
-	log.Println("WRITE - EBADFD")
+	//log.Println("WRITE - EBADFD")
 	return 0, syscall.EBADFD // bad file descriptor
 }
 
 func (n *OptiFSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	log.Println("ENTERED FLUSH")
+	//log.Println("ENTERED FLUSH")
 	if f != nil {
 		return f.(fs.FileFlusher).Flush(ctx)
 	}
-	log.Println("FLUSH - EBADFD")
+	//log.Println("FLUSH - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
 // FUSE's version of a close
 func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	log.Println("ENTERED RELEASE")
+	//log.Println("ENTERED RELEASE")
 	if f != nil {
 		return f.(fs.FileReleaser).Release(ctx)
 	}
-	log.Println("RELEASE - EBADFD")
+	//log.Println("RELEASE - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
 func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
-	log.Println("ENTERED FSYNC")
+	//log.Println("ENTERED FSYNC")
 	if f != nil {
 		return f.(fs.FileFsyncer).Fsync(ctx, flags)
 	}
-	log.Println("FSYNC - EBADFD")
+	//log.Println("FSYNC - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
@@ -478,7 +480,7 @@ func (n *OptiFSNode) Getlk(ctx context.Context, f fs.FileHandle, owner uint64, l
 	if f != nil {
 		return f.(fs.FileGetlker).Getlk(ctx, owner, lk, flags, out) // send it if filehandle exists
 	}
-	log.Println("GETLK - EBADFD")
+	//log.Println("GETLK - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
@@ -487,7 +489,7 @@ func (n *OptiFSNode) Setlk(ctx context.Context, f fs.FileHandle, owner uint64, l
 	if f != nil {
 		return f.(fs.FileSetlker).Setlk(ctx, owner, lk, flags) // send it if filehandle exists
 	}
-	log.Println("SETLK - EBADFD")
+	//log.Println("SETLK - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
@@ -497,74 +499,106 @@ func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, 
 	if f != nil {
 		return f.(fs.FileSetlkwer).Setlkw(ctx, owner, lk, flags) // send it if filehandle exists
 	}
-	log.Println("SETLKW - EBADFD")
+	//log.Println("SETLKW - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
 // Moves a node to a different directory. Change is only reflected in the filetree IFF returns fs.OK
 // From go-fuse/fs/loopback.go
 func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
-    // IFF this operation is to be done atomically (which is a far more delicate operation)
-    if flags&unix.RENAME_EXCHANGE != 0 {
-        n.renameExchange(name, newParent, newName)
-    }
+	// IFF this operation is to be done atomically (which is a far more delicate operation)
+	if flags&unix.RENAME_EXCHANGE != 0 {
+		n.renameExchange(name, newParent, newName)
+	}
 
-    p1 := filepath.Join(n.path(), name)
-    p2 := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
+    // Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
+	p1 := filepath.Join(n.path(), name)
+	p2 := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
 
-    err := syscall.Rename(p1, p2)
-    return fs.ToErrno(err)
+	err := syscall.Rename(p1, p2)
+	return fs.ToErrno(err)
 }
 
 // Handles the name exchange of two inodes
 //
-// Adapted from go-fuse/fs/loopback.go 
+// Adapted from go-fuse/fs/loopback.go
 func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
-    // Open the directory of the current node
-    currDirFd, err := syscall.Open(n.path(), syscall.O_DIRECTORY, 0)
-    if err != nil {
-        return fs.ToErrno(err)
-    }
-    defer syscall.Close(currDirFd)
+	// Open the directory of the current node
+	currDirFd, err := syscall.Open(n.path(), syscall.O_DIRECTORY, 0)
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+	defer syscall.Close(currDirFd)
 
-    // Open the new parent directory
-    newParentDirPath := filepath.Join(n.RootNode.Path, newparent.EmbeddedInode().Path(nil)) 
-    newParentDirFd, err := syscall.Open(newParentDirPath, syscall.O_DIRECTORY, 0)
-    if err != nil {
-        return fs.ToErrno(err)
-    }
-    defer syscall.Close(currDirFd)
+	// Open the new parent directory
+	newParentDirPath := filepath.Join(n.RootNode.Path, newparent.EmbeddedInode().Path(nil))
+	newParentDirFd, err := syscall.Open(newParentDirPath, syscall.O_DIRECTORY, 0)
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+	defer syscall.Close(currDirFd)
 
-    // Get the directory status for data integrity checks
-    var st syscall.Stat_t
-    if err := syscall.Fstat(currDirFd, &st); err != nil {
-        return fs.ToErrno(err)
-    }
+	// Get the directory status for data integrity checks
+	var st syscall.Stat_t
+	if err := syscall.Fstat(currDirFd, &st); err != nil {
+		return fs.ToErrno(err)
+	}
 
-    inode := &n.Inode
-    // Check to see if the user is trying to move the root directory, and that the inode number
-    // is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
-    if inode.Root() != inode && inode.StableAttr().Ino != n.RootNode.idFromStat(&st).Ino {
-        // Return EBUSY if there is something amiss - suggesting the resource is busy
-        return syscall.EBUSY
-    }
+	inode := &n.Inode
+	// Check to see if the user is trying to move the root directory, and that the inode number
+	// is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
+	if inode.Root() != inode && inode.StableAttr().Ino != n.RootNode.idFromStat(&st).Ino {
+		// Return EBUSY if there is something amiss - suggesting the resource is busy
+		return syscall.EBUSY
+	}
 
+	// Check the status of the new parent directory
+	if err := syscall.Fstat(newParentDirFd, &st); err != nil {
+		return fs.ToErrno(err)
+	}
 
-    // Check the status of the new parent directory
-    if err := syscall.Fstat(newParentDirFd, &st); err != nil {
-        return fs.ToErrno(err)
-    }
+	newParentDirInode := newparent.EmbeddedInode()
+	// Ensure that the new directory isn't the root node, and that the inodes match up, same
+	// consistency checks as above
+	if newParentDirInode.Root() != newParentDirInode && newParentDirInode.StableAttr().Ino != n.RootNode.idFromStat(&st).Ino {
+		return syscall.EBUSY
+	}
 
-    newParentDirInode := newparent.EmbeddedInode()
-    // Ensure that the new directory isn't the root node, and that the inodes match up, same
-    // consistency checks as above
-    if newParentDirInode.Root() != newParentDirInode && newParentDirInode.StableAttr().Ino != n.RootNode.idFromStat(&st).Ino {
-        return syscall.EBUSY
-    }
-
-    // Perform the actual rename operation
-    // Use Renameat2, an advanced version of Rename which accepts flags, which itself is an
-    // extension of the rename syscall. Use RENAME_EXCHANGE as this forces the exchange to
-    // occur atomically - avoiding race conditions
-    return fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
+	// Perform the actual rename operation
+	// Use Renameat2, an advanced version of Rename which accepts flags, which itself is an
+	// extension of the rename syscall. Use RENAME_EXCHANGE as this forces the exchange to
+	// occur atomically - avoiding race conditions
+	return fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
 }
+
+// Creates a node that isn't a regular file/dir/node - like device nodes or pipes
+func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+    // Create the path of the node to be created
+    nodePath := filepath.Join(n.path(), name)
+    // Create the node
+    if err := syscall.Mknod(nodePath, mode, int(dev)); err != nil {
+        return nil, fs.ToErrno(err)
+    }
+
+    // Keep the owner
+    n.setOwner(ctx, nodePath)
+
+    st := syscall.Stat_t{}
+    if err := syscall.Lstat(nodePath, &st); err != nil {
+        // Kill the node if we can't Lstat it - something went wrong
+        syscall.Unlink(nodePath)
+        return nil, fs.ToErrno(err)
+    }
+
+    // Fill in the out attributes
+    out.Attr.FromStat(&st)
+
+    // Create a fuse node to represent this new node
+    newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
+
+    // Actually create the node within FUSE
+    x := n.NewInode(ctx, newNode, n.RootNode.idFromStat(&st))
+
+    return x, fs.OK;
+}
+
