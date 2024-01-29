@@ -159,7 +159,7 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
 func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	log.Println("ENTERED GETATTR")
+	log.Println("1. ENTERED GETATTR")
 	// if we have a file handle, use it to get the attributes
 	if f != nil {
 		return f.(fs.FileGetattrer).Getattr(ctx, out)
@@ -167,22 +167,27 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 
 	// OTHERWISE get the node's attributes (stat the node)
 	path := n.path()
-	log.Printf("NO FILEHANDLE PASSED IN GETATTR, STATING %v INSTEAD\n", path)
+	log.Printf("2. NO FILEHANDLE PASSED IN GETATTR, STATING %v INSTEAD\n", path)
 	var err error
 	s := syscall.Stat_t{}
 	// IF we're dealing with the root, stat it directly as opposed to handling symlinks
 	if &n.Inode == n.Root() {
 		err = syscall.Stat(path, &s) // if we are looking for the root of FS
+        log.Println("3. Statted the root of the FS")
 	} else {
 		// Otherwise, use Lstat to handle symlinks as well as normal files/directories
 		err = syscall.Lstat(path, &s) // if it's just a normal file/dir
+        log.Println("3. Lstatted the file path")
 	}
 
 	if err != nil {
+        log.Println("3.1 ERROR STATTING")
 		return fs.ToErrno(err)
 	}
 
+    log.Println("4. Filled the stat struct")
 	out.FromStat(&s) // no error getting attrs, fill them in out
+    log.Println("5. OK")
 	return fs.OK
 }
 
