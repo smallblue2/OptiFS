@@ -1,3 +1,5 @@
+// A FileHandle represents an open file or directory, acting as
+// an abstraction for an open file descriptor.
 package file
 
 import (

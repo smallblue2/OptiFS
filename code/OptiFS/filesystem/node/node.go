@@ -10,6 +10,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+    "golang.org/x/sys/unix"
 )
 
 // Root for OptiFS
@@ -59,6 +60,7 @@ var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))       // Ensures writes are actuall
 var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))       // find conflicting locks for given lock
 var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))       // gets a lock on a node
 var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil))      // gets a lock on a node, waits for it to be ready
+var _ = (fs.NodeRenamer)((*OptiFSNode)(nil)) // Changes the directory a node is in
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -272,7 +274,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 }
 
 // Opens a file for reading, and returns a filehandle
-// flags determines how we open the file (read only, read-write)
+// flags determines how we open the file (read only, read-write, etc...)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, fFlags uint32, errno syscall.Errno) {
 	// Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
 	log.Println("ENTERED OPEN")
@@ -492,4 +494,72 @@ func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, 
 	}
 	log.Println("SETLKW - EBADFD")
 	return syscall.EBADFD // bad file descriptor
+}
+
+// Moves a node to a different directory. Change is only reflected in the filetree IFF returns fs.OK
+// From go-fuse/fs/loopback.go
+func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+    // IFF this operation is to be done atomically (which is a far more delicate operation)
+    if flags&unix.RENAME_EXCHANGE != 0 {
+        n.renameExchange(name, newParent, newName)
+    }
+
+    p1 := filepath.Join(n.path(), name)
+    p2 := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
+
+    err := syscall.Rename(p1, p2)
+    return fs.ToErrno(err)
+}
+
+// Handles the name exchange of two inodes
+//
+// Adapted from go-fuse/fs/loopback.go 
+func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
+    // Open the directory of the current node
+    currDirFd, err := syscall.Open(n.path(), syscall.O_DIRECTORY, 0)
+    if err != nil {
+        return fs.ToErrno(err)
+    }
+    defer syscall.Close(currDirFd)
+
+    // Open the new parent directory
+    newParentDirPath := filepath.Join(n.RootNode.Path, newparent.EmbeddedInode().Path(nil)) 
+    newParentDirFd, err := syscall.Open(newParentDirPath, syscall.O_DIRECTORY, 0)
+    if err != nil {
+        return fs.ToErrno(err)
+    }
+    defer syscall.Close(currDirFd)
+
+    // Get the directory status for data integrity checks
+    var st syscall.Stat_t
+    if err := syscall.Fstat(currDirFd, &st); err != nil {
+        return fs.ToErrno(err)
+    }
+
+    inode := &n.Inode
+    // Check to see if the user is trying to move the root directory, and that the inode number
+    // is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
+    if inode.Root() != inode && inode.StableAttr().Ino != n.RootNode.idFromStat(&st).Ino {
+        // Return EBUSY if there is something amiss - suggesting the resource is busy
+        return syscall.EBUSY
+    }
+
+
+    // Check the status of the new parent directory
+    if err := syscall.Fstat(newParentDirFd, &st); err != nil {
+        return fs.ToErrno(err)
+    }
+
+    newParentDirInode := newparent.EmbeddedInode()
+    // Ensure that the new directory isn't the root node, and that the inodes match up, same
+    // consistency checks as above
+    if newParentDirInode.Root() != newParentDirInode && newParentDirInode.StableAttr().Ino != n.RootNode.idFromStat(&st).Ino {
+        return syscall.EBUSY
+    }
+
+    // Perform the actual rename operation
+    // Use Renameat2, an advanced version of Rename which accepts flags, which itself is an
+    // extension of the rename syscall. Use RENAME_EXCHANGE as this forces the exchange to
+    // occur atomically - avoiding race conditions
+    return fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
 }
