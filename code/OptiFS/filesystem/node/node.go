@@ -62,6 +62,9 @@ var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))       // gets a lock on a node
 var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil))      // gets a lock on a node, waits for it to be ready
 var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))       // Changes the directory a node is in
 var _ = (fs.NodeMknoder)((*OptiFSNode)(nil))       // Similar to lookup, but creates the inode
+var _ = (fs.NodeLinker)((*OptiFSNode)(nil))        // For handling hard links
+var _ = (fs.NodeSymlinker)((*OptiFSNode)(nil))     // For handling hard links
+var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil))    // For reading symlinks
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -122,7 +125,7 @@ func (n *OptiFSNode) GetInode() uint64 {
 func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	//log.Printf("LOOKUP performed for %v from node %v\n", name, n.path())
 	filePath := filepath.Join(n.path(), name) // getting the full path to the file (join name to path)
-	s := syscall.Stat_t{}               // status of a file
+	s := syscall.Stat_t{}                     // status of a file
 	err := syscall.Lstat(filePath, &s)        // gets the file attributes (also returns attrs of symbolic link)
 
 	if err != nil {
@@ -302,7 +305,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
 	//log.Println("ENTERED GETXATTR")
 	// Pass it down to the filesystem below
-	attributeSize, err := syscall.Getxattr(n.path(), attr, dest)
+	attributeSize, err := unix.Lgetxattr(n.path(), attr, dest)
 	return uint32(attributeSize), fs.ToErrno(err)
 }
 
@@ -310,14 +313,14 @@ func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (ui
 func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
 	//log.Println("ENTERED SETXATTR")
 	// Pass it down to the filesystem below
-	err := syscall.Setxattr(n.path(), attr, data, int(flags))
+	err := unix.Lsetxattr(n.path(), attr, data, int(flags))
 	return fs.ToErrno(err)
 }
 
 // Remove EXTENDED attribute
 func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
 	//log.Println("ENTERED REMOVEXATTR")
-	err := syscall.Removexattr(n.path(), attr)
+	err := unix.Lremovexattr(n.path(), attr)
 	return fs.ToErrno(err)
 }
 
@@ -325,7 +328,7 @@ func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno
 func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
 	//log.Println("ENTERED LISTXATTR")
 	// Pass it down to the filesystem below
-	allAttributesSize, err := syscall.Listxattr(n.path(), dest)
+	allAttributesSize, err := unix.Llistxattr(n.path(), dest)
 	return uint32(allAttributesSize), fs.ToErrno(err)
 }
 
@@ -511,7 +514,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 		n.renameExchange(name, newParent, newName)
 	}
 
-    // Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
+	// Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
 	p1 := filepath.Join(n.path(), name)
 	p2 := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
 
@@ -573,32 +576,108 @@ func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 
 // Creates a node that isn't a regular file/dir/node - like device nodes or pipes
 func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-    // Create the path of the node to be created
-    nodePath := filepath.Join(n.path(), name)
-    // Create the node
-    if err := syscall.Mknod(nodePath, mode, int(dev)); err != nil {
-        return nil, fs.ToErrno(err)
-    }
+	// Create the path of the node to be created
+	nodePath := filepath.Join(n.path(), name)
+	// Create the node
+	if err := syscall.Mknod(nodePath, mode, int(dev)); err != nil {
+		return nil, fs.ToErrno(err)
+	}
 
-    // Keep the owner
-    n.setOwner(ctx, nodePath)
+	// Keep the owner
+	n.setOwner(ctx, nodePath)
 
-    st := syscall.Stat_t{}
-    if err := syscall.Lstat(nodePath, &st); err != nil {
-        // Kill the node if we can't Lstat it - something went wrong
-        syscall.Unlink(nodePath)
-        return nil, fs.ToErrno(err)
-    }
+	st := syscall.Stat_t{}
+	if err := syscall.Lstat(nodePath, &st); err != nil {
+		// Kill the node if we can't Lstat it - something went wrong
+		syscall.Unlink(nodePath)
+		return nil, fs.ToErrno(err)
+	}
 
-    // Fill in the out attributes
-    out.Attr.FromStat(&st)
+	// Fill in the out attributes
+	out.Attr.FromStat(&st)
 
-    // Create a fuse node to represent this new node
-    newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
+	// Create a fuse node to represent this new node
+	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
 
-    // Actually create the node within FUSE
-    x := n.NewInode(ctx, newNode, n.RootNode.idFromStat(&st))
+	// Actually create the node within FUSE
+	x := n.NewInode(ctx, newNode, n.RootNode.idFromStat(&st))
 
-    return x, fs.OK;
+	return x, fs.OK
 }
 
+// Handles the creation of hardlinks
+func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
+	// Construct the full paths
+	sourcePath := filepath.Join(n.RootNode.Path, target.EmbeddedInode().Path(nil))
+	targetPath := filepath.Join(n.path(), name)
+	if err := syscall.Link(sourcePath, targetPath); err != nil {
+		return nil, fs.ToErrno(err)
+	}
+
+	// Get the status of this new hard link
+	st := syscall.Stat_t{}
+	if err := syscall.Stat(targetPath, &st); err != nil {
+		syscall.Unlink(targetPath)
+		return nil, fs.ToErrno(nil)
+	}
+
+	// Fill in the out attributes
+	out.Attr.FromStat(&st)
+
+	// Actually create the fuse node to represent this link
+	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
+	x := n.NewInode(ctx, newNode, n.RootNode.idFromStat(&st))
+
+	return x, fs.OK
+}
+
+func (n *OptiFSNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
+	// Construct the paths
+	sourcePath := filepath.Join(n.RootNode.Path, target)
+	targetPath := filepath.Join(n.path(), name)
+
+	// Perform the hardlink in the underlying file system
+	if err := syscall.Symlink(sourcePath, targetPath); err != nil {
+		return nil, fs.ToErrno(err)
+	}
+
+	// Set the owner to the creator
+	n.setOwner(ctx, targetPath)
+
+	st := syscall.Stat_t{}
+	if err := syscall.Lstat(targetPath, &st); err != nil {
+		syscall.Unlink(targetPath)
+		return nil, fs.ToErrno(err)
+	}
+
+	// Fill the attributes in out
+	out.Attr.FromStat(&st)
+
+	// Create the FUSE node to represent the symlink
+	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
+	x := n.NewInode(ctx, newNode, n.RootNode.idFromStat(&st))
+
+	return x, fs.OK
+}
+
+// Handles reading a symlink
+func (n *OptiFSNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	linkPath := n.path()
+
+	// Keep trying to read the link, doubling our buffler size each time
+    // 256 is just an arbitrary number that isn't necessarily too large,
+    // or too small. 
+	for l := 256; ; l *= 2 {
+        // Create a buffer to read the link into
+		buffer := make([]byte, l)
+		sz, err := syscall.Readlink(linkPath, buffer)
+		if err != nil {
+			return nil, fs.ToErrno(err)
+		}
+
+        // If we fit the data into the buffer, return it
+		if sz < len(buffer) {
+			return buffer[:sz], fs.OK
+		}
+	}
+}
