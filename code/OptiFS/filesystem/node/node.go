@@ -3,7 +3,8 @@ package node
 import (
 	"context"
 	"filesystem/file"
-	//"log"
+	"filesystem/hashing"
+	"log"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -33,6 +34,9 @@ type OptiFSNode struct {
 
 	// The root node of the filesystem
 	RootNode *OptiFSRoot
+
+    currentHash [64]byte
+    refNum uint64
 }
 
 // Interfaces/contracts to abide by
@@ -69,6 +73,7 @@ var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil))    // For reading symlinks
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
 func (n *OptiFSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+    log.Println("IN STATFS")
 	// As this is a loopback filesystem, we will stat the underlying filesystem.
 	var s syscall.Statfs_t = syscall.Statfs_t{}
 	err := syscall.Statfs(n.path(), &s)
@@ -115,10 +120,9 @@ func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
 	}
 }
 
-// get the inode number for the file hashing
-func (n *OptiFSNode) GetInode() uint64 {
-	attr := n.StableAttr()
-	return attr.Ino
+// get the attributes for the file hashing
+func (n *OptiFSNode) GetAttr() fs.StableAttr {
+	return n.StableAttr()
 }
 
 // lookup FINDS A NODE based on its name
@@ -164,56 +168,107 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
 func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	//log.Println("1. ENTERED GETATTR")
+	log.Println("NODE || entered GETATTR")
 	// if we have a file handle, use it to get the attributes
 	if f != nil {
+        log.Println("Filehandle isn't nil!")
 		return f.(fs.FileGetattrer).Getattr(ctx, out)
 	}
 
-	// OTHERWISE get the node's attributes (stat the node)
+    log.Println("Filehandle is nil, using node!")
+
+    // Try and get an entry in our own custom system
+    var defaultHash [64]byte // For checking to see if our CurrentHash is defined or not
+    if n.currentHash != defaultHash && n.refNum != 0 { // If we have values defined
+        if err, metadata := hashing.LookupEntry(n.currentHash, n.refNum); err == nil {
+            log.Println("Getting custom attributes!")
+            // Fill the AttrOut with our custom attributes stored in our hash
+            out.Attr.Size = uint64(metadata.Size)
+            out.Attr.Blocks = uint64(metadata.Blocks)
+            out.Attr.Atime = uint64(metadata.Atim.Sec)
+            out.Attr.Atimensec = uint32(metadata.Atim.Nsec)
+            out.Attr.Mtime = uint64(metadata.Mtim.Sec)
+            out.Attr.Mtimensec = uint32(metadata.Mtim.Nsec)
+            out.Attr.Ctime = uint64(metadata.Ctim.Sec)
+            out.Attr.Ctimensec = uint32(metadata.Ctim.Nsec)
+            out.Attr.Mode = metadata.Mode
+            out.Attr.Nlink = uint32(metadata.Nlink)
+            out.Attr.Uid = uint32(metadata.Uid)
+            out.Attr.Gid = uint32(metadata.Gid)
+            out.Attr.Rdev = uint32(metadata.Rdev)
+            out.Attr.Blksize = uint32(metadata.Blksize)
+
+            return fs.OK
+        }
+    }
+
+    log.Println("Couldn't find an entry, statting the underlying file!")
+
+    // OTHERWISE, just stat the node
 	path := n.path()
-	//log.Printf("2. NO FILEHANDLE PASSED IN GETATTR, STATING %v INSTEAD\n", path)
 	var err error
 	s := syscall.Stat_t{}
 	// IF we're dealing with the root, stat it directly as opposed to handling symlinks
 	if &n.Inode == n.Root() {
 		err = syscall.Stat(path, &s) // if we are looking for the root of FS
-		//log.Println("3. Statted the root of the FS")
 	} else {
 		// Otherwise, use Lstat to handle symlinks as well as normal files/directories
 		err = syscall.Lstat(path, &s) // if it's just a normal file/dir
-		//log.Println("3. Lstatted the file path")
 	}
 
 	if err != nil {
-		//log.Println("3.1 ERROR STATTING")
 		return fs.ToErrno(err)
 	}
 
-	//log.Println("4. Filled the stat struct")
 	out.FromStat(&s) // no error getting attrs, fill them in out
-	//log.Println("5. OK")
 	return fs.OK
 }
 
 // Sets attributes of a node
 func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	//log.Println("ENTERED SETATTR")
+
+    log.Println("NODE || entered SETATTR")
 
 	// If we have a file descriptor, use its setattr
 	if f != nil {
 		return f.(fs.FileSetattrer).Setattr(ctx, in, out)
 	}
 
-	// Manually change the attributes ourselves
+    // OTHERWISE, first try and update our own custom metadata system
+    var foundEntry bool
+    var customMetadata hashing.MapEntryMetadata
+
+    // Check to see if we can find an entry in our hashmap
+    var defaultHash [64]byte // For checking to see if our CurrentHash is defined or not
+    if n.currentHash != defaultHash && n.refNum != 0 { // If we have values defined
+        if err, metadata := hashing.LookupEntry(n.currentHash, n.refNum); err == nil {
+            log.Println("Found custom metadata entry")
+            foundEntry = true
+            customMetadata = metadata
+        }
+    }
+
+    if foundEntry == false {
+        log.Println("Couldn't find custom metadata entry")
+    }
+
+	// If we need to - Manually change the underlying attributes ourselves
 	path := n.path()
 
 	// If the mode needs to be changed
 	if mode, ok := in.GetMode(); ok {
-		// Change the mode to the new mode
-		if err := syscall.Chmod(path, mode); err != nil {
-			return fs.ToErrno(err)
-		}
+        // Try and modify our custom metadata system first
+        if foundEntry {
+            customMetadata.Mode = mode
+            log.Println("Updated custom mode")
+        // Otherwise just update the underlying node's mode
+        } else {
+            // Change the mode to the new mode
+            if err := syscall.Chmod(path, mode); err != nil {
+                return fs.ToErrno(err)
+            }
+            log.Println("Updated underlying mode")
+        }
 	}
 
 	// Try and get UID and GID
@@ -230,11 +285,25 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		if gok {
 			safeGID = int(gid)
 		}
-		// Chown these values
-		err := syscall.Chown(path, safeUID, safeGID)
-		if err != nil {
-			return fs.ToErrno(err)
-		}
+        // Try and update our custom metadata system isntead
+        if foundEntry {
+            if safeUID != -1 {
+                customMetadata.Uid = uint32(safeUID)
+                log.Println("Updated custom UID")
+            }
+            if safeGID != -1 {
+                customMetadata.Gid = uint32(safeGID)
+                log.Println("Updated custom GID")
+            }
+        // Otherwise, just update the underlying node instead
+        } else {
+            // Chown these values
+            err := syscall.Chown(path, safeUID, safeGID)
+            if err != nil {
+                return fs.ToErrno(err)
+            }
+            log.Println("Updated underlying UID & GID")
+        }
 	}
 
 	// Same thing for modification and access times
@@ -258,21 +327,66 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		var times [2]syscall.Timespec
 		times[0] = fuse.UtimeToTimespec(ap)
 		times[1] = fuse.UtimeToTimespec(mp)
-		// Call the utimenano syscall, ensuring to convert our time array
-		// into a slice, as it expects one
-		if err := syscall.UtimesNano(path, times[:]); err != nil {
-			return fs.ToErrno(err)
-		}
+
+        // Try and update our own custom metadata system first
+        if foundEntry {
+            if ap != nil {
+                customMetadata.Atim = times[0]
+                log.Println("Updated custom ATime")
+            }
+            if mp != nil {
+                customMetadata.Mtim = times[1]
+                log.Println("Updated custom MTime")
+            }
+        // OTHERWISE update the underlying file
+        } else {
+            // Call the utimenano syscall, ensuring to convert our time array
+            // into a slice, as it expects one
+            if err := syscall.UtimesNano(path, times[:]); err != nil {
+                return fs.ToErrno(err)
+            }
+            log.Println("Updated underlying ATime & MTime")
+        }
 	}
 
 	// If we have a size to update, do so as well
 	if size, ok := in.GetSize(); ok {
-		if err := syscall.Truncate(path, int64(size)); err != nil {
-			return fs.ToErrno(err)
-		}
+        // First try and change the custom metadata system
+        if foundEntry {
+            customMetadata.Size = int64(size)
+            log.Println("Updated custom size")
+        } else {
+            if err := syscall.Truncate(path, int64(size)); err != nil {
+                return fs.ToErrno(err)
+            }
+            log.Println("Updated underlying size")
+        }
 	}
 
 	// Now reflect these changes in the out stream
+    // Use our custom datastruct if we can
+    if foundEntry {
+        log.Println("Reflecting custom attributes changes!")
+        // Fill the AttrOut with our custom attributes stored in our hash
+        out.Attr.Size = uint64(customMetadata.Size)
+        out.Attr.Blocks = uint64(customMetadata.Blocks)
+        out.Attr.Atime = uint64(customMetadata.Atim.Sec)
+        out.Attr.Atimensec = uint32(customMetadata.Atim.Nsec)
+        out.Attr.Mtime = uint64(customMetadata.Mtim.Sec)
+        out.Attr.Mtimensec = uint32(customMetadata.Mtim.Nsec)
+        out.Attr.Ctime = uint64(customMetadata.Ctim.Sec)
+        out.Attr.Ctimensec = uint32(customMetadata.Ctim.Nsec)
+        out.Attr.Mode = customMetadata.Mode
+        out.Attr.Nlink = uint32(customMetadata.Nlink)
+        out.Attr.Uid = uint32(customMetadata.Uid)
+        out.Attr.Gid = uint32(customMetadata.Gid)
+        out.Attr.Rdev = uint32(customMetadata.Rdev)
+        out.Attr.Blksize = uint32(customMetadata.Blksize)
+
+        return fs.OK
+    }
+
+    log.Println("Reflecting underlying attributes changes!")
 	stat := syscall.Stat_t{}
 	err := syscall.Lstat(path, &stat) // respect symlinks with lstat
 	if err != nil {
@@ -295,7 +409,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	}
 
 	// Creates a custom filehandle from the returned file descriptor from Open
-	optiFile := file.NewOptiFSFile(fileDescriptor, n.GetInode(), flags)
+	optiFile := file.NewOptiFSFile(fileDescriptor, n.GetAttr(), flags, n.currentHash, n.refNum)
 	//log.Println("Created a new loopback file")
 	return optiFile, flags, fs.OK
 
@@ -415,7 +529,7 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 	// file's attributes with an auto generated inode in idFromStat
 	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
 
-	newFile := file.NewOptiFSFile(fdesc, n.GetInode(), flags) // make filehandle for file operations
+	newFile := file.NewOptiFSFile(fdesc, n.GetAttr(), flags, n.currentHash, n.refNum) // make filehandle for file operations
 
 	out.FromStat(&s) // fill out info
 
@@ -441,10 +555,13 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
 	//log.Println("ENTERED WRITE")
 	if f != nil {
-		return f.(fs.FileWriter).Write(ctx, data, off)
-		// result, err := f.(fs.FileWriter).Write(ctx, data, off)
-		// hashing.FileHashes[GetInode()] =
+        written, errno := f.(fs.FileWriter).Write(ctx, data, off)
+        n.currentHash = f.(*file.OptiFSFile).CurrentHash
+        n.refNum = f.(*file.OptiFSFile).RefNum
+        log.Printf("Node retrieved currentHash (%+v) and refNum (%+v)\n", n.currentHash, n.refNum)
+		return written, errno
 	}
+
 
 	//log.Println("WRITE - EBADFD")
 	return 0, syscall.EBADFD // bad file descriptor

@@ -5,13 +5,17 @@ package file
 import (
 	"context"
 	"filesystem/hashing"
-	//"log"
+	//"hash"
+
+	//"filesystem/hashing"
+	"log"
 	"sync"
 	"syscall"
 	"unsafe"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	//"golang.org/x/sys/unix"
 )
 
 // represents open files in the system, use for handling filehandles
@@ -23,10 +27,13 @@ type OptiFSFile struct {
 	fdesc int
 
 	// store the hash of the file content
-	hashed [64]byte
+	CurrentHash [64]byte
 
-	// inode of the file (for hashing purposes [key])
-	inode uint64
+    // Reference number in our memory
+    RefNum uint64
+
+	// Stable attributes of the file
+	attr fs.StableAttr
 
     // The flags of the file (OAPPEND, RWONLY, etc...)
     flags uint32
@@ -55,9 +62,9 @@ var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil))  // gets a lock on a file, waits f
 // makes a filehandle, to give more control over operations on files in the system
 // abstract reference to files, where the state of the file (open, offsets, reading etc)
 // can be tracked
-func NewOptiFSFile(fdesc int, inode uint64, flags uint32) fs.FileHandle {
+func NewOptiFSFile(fdesc int, attr fs.StableAttr, flags uint32, currentHash [64]byte, refNum uint64) fs.FileHandle {
 	//log.Println("NEW OPTIFSFILE CREATED")
-    return &OptiFSFile{fdesc: fdesc, inode: inode, flags: flags}
+    return &OptiFSFile{fdesc: fdesc, attr: attr, flags: flags, CurrentHash: currentHash, RefNum: refNum}
 }
 
 // handles read operations (implements concurrency)
@@ -104,6 +111,36 @@ func (f *OptiFSFile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Err
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+    log.Println("FILE || entered GETATTR")
+
+    // Try and get an entry in our own custom system
+    var defaultHash [64]byte // For checking to see if our CurrentHash is defined or not
+    if f.CurrentHash != defaultHash && f.RefNum != 0 { // If we have values defined
+        if err, metadata := hashing.LookupEntry(f.CurrentHash, f.RefNum); err == nil {
+            log.Println("Getting custom attributes!")
+            // Fill the AttrOut with our custom attributes stored in our hash
+            out.Attr.Size = uint64(metadata.Size)
+            out.Attr.Blocks = uint64(metadata.Blocks)
+            out.Attr.Atime = uint64(metadata.Atim.Sec)
+            out.Attr.Atimensec = uint32(metadata.Atim.Nsec)
+            out.Attr.Mtime = uint64(metadata.Mtim.Sec)
+            out.Attr.Mtimensec = uint32(metadata.Mtim.Nsec)
+            out.Attr.Ctime = uint64(metadata.Ctim.Sec)
+            out.Attr.Ctimensec = uint32(metadata.Ctim.Nsec)
+            out.Attr.Mode = metadata.Mode
+            out.Attr.Nlink = uint32(metadata.Nlink)
+            out.Attr.Uid = uint32(metadata.Uid)
+            out.Attr.Gid = uint32(metadata.Gid)
+            out.Attr.Rdev = uint32(metadata.Rdev)
+            out.Attr.Blksize = uint32(metadata.Blksize)
+
+            return fs.OK
+        }
+    }
+
+    // OTHERWISE, just stat the file
+    log.Println("Couldn't find an entry, statting the underlying file!")
+
 	s := syscall.Stat_t{}
 	err := syscall.Fstat(f.fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
 
@@ -120,12 +157,36 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+    log.Println("FILE || entered SETATTR")
+
+    var foundEntry bool
+    var customMetadata hashing.MapEntryMetadata
+
+    // Check to see if we can find an entry in our hashmap
+    var defaultHash [64]byte // For checking to see if our CurrentHash is defined or not
+    if f.CurrentHash != defaultHash && f.RefNum != 0 { // If we have values defined
+        if err, metadata := hashing.LookupEntry(f.CurrentHash, f.RefNum); err == nil {
+            log.Println("Found custom metadata entry")
+            foundEntry = true
+            customMetadata = metadata
+        }
+    }
+
 	// Check to see if we need to change the mode
 	if mode, ok := in.GetMode(); ok {
 		// If so, change the mode
-		if err := syscall.Fchmod(f.fdesc, mode); err != nil {
-			return fs.ToErrno(err)
-		}
+        
+        // Try our custom metadata system first
+        if foundEntry {
+            log.Println("Updated custom mode")
+            customMetadata.Mode = mode
+        // Otherwise just attempt the underlying file
+        } else {
+            log.Println("Updated underlying mode")
+            if err := syscall.Fchmod(f.fdesc, mode); err != nil {
+                return fs.ToErrno(err)
+            }
+        }
 	}
 
 	// Check to see if we need to change the UID or GID
@@ -142,11 +203,25 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 		if gok {
 			safeGID = int(gid)
 		}
-		// Chown these values
-		err := syscall.Fchown(f.fdesc, safeUID, safeGID)
-		if err != nil {
-			return fs.ToErrno(err)
-		}
+        // Try our custom metadata system first
+        if foundEntry {
+            if safeUID != -1 {
+                customMetadata.Uid = uint32(safeUID)
+                log.Println("Updated custom UID")
+            }
+            if safeGID != -1 {
+                customMetadata.Gid = uint32(safeGID)
+                log.Println("Updated custom GID")
+            }
+        // Otherwise do the underlying node
+        } else {
+            // Chown these values
+            err := syscall.Fchown(f.fdesc, safeUID, safeGID)
+            if err != nil {
+                return fs.ToErrno(err)
+            }
+            log.Println("Updated underlying UID & GID")
+        }
 	}
 
 	// Same thing for modification and access times
@@ -172,20 +247,41 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 		times[0] = fuse.UtimeToTimespec(ap)
 		times[1] = fuse.UtimeToTimespec(mp)
 
-		// BELOW LINE IS FROM `fs` package, hanwen - TODO: REFERENCE PROPERLY
-		_, _, err := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(f.fdesc), 0, uintptr(unsafe.Pointer(&times)), uintptr(0), 0, 0)
-		err = syscall.Errno(err)
-		if err != 0 {
-			return fs.ToErrno(err)
-		}
+        // Check to see if we can update our custom metadata system first
+        if foundEntry {
+            if ap != nil {
+                customMetadata.Atim = times[0]
+                log.Println("Updated custom ATime")
+            }
+            if mp != nil {
+                customMetadata.Mtim = times[1]
+                log.Println("Updated custom MTime")
+            }
+        // OTHERWISE update the underlying file
+        } else {
+            // BELOW LINE IS FROM `fs` package, hanwen - TODO: REFERENCE PROPERLY
+            _, _, err := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(f.fdesc), 0, uintptr(unsafe.Pointer(&times)), uintptr(0), 0, 0)
+            err = syscall.Errno(err)
+            if err != 0 {
+                return fs.ToErrno(err)
+            }
+            log.Println("Updated underlying ATime & MTime")
+        }
 	}
 
 	// Check to see if we need to change the size
 	if sz, ok := in.GetSize(); ok {
-		// Change the size
-		if err := fs.ToErrno(syscall.Ftruncate(f.fdesc, int64(sz))); err != 0 {
-			return err
-		}
+        // First try and change the custom metadata system
+        if foundEntry {
+            customMetadata.Size = int64(sz)
+            log.Println("Updated custom size")
+        } else {
+            // Change the size
+            if err := fs.ToErrno(syscall.Ftruncate(f.fdesc, int64(sz))); err != 0 {
+                return err
+            }
+            log.Println("Updated underlying size")
+        }
 	}
 
 	return fs.OK
@@ -194,14 +290,34 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// pwrite writes to a filedescriptor from a given offset
-	numOfBytesWritten, err := syscall.Pwrite(f.fdesc, data, off)
-	f.hashed = hashing.HashData(data, f.flags) // hash the data and store the hash
-	//log.Printf("INODE: %v\n", f.inode)
 
-	hashing.FileHashes[f.hashed] = f.inode // put the k, v pair into the hashmap
+    var st syscall.Stat_t
+    err := syscall.Fstat(f.fdesc, &st)
+    if err != nil {
+        return 0, fs.ToErrno(err)
+    }
 
-	return uint32(numOfBytesWritten), fs.ToErrno(err)
+    // TODO: Hash the content and update the metadata
+    
+    // Hash the current contents
+    f.CurrentHash = hashing.HashContents(data, f.flags)
+    // Check to see if it's unique
+    isUnique, _ := hashing.IsUnique(f.CurrentHash)
+    log.Printf("File is unique: %v\n", isUnique)
+    // Update OR create the entry TODO: I think it should only be created in Create syscall, not write.
+    log.Printf("Context: %+v\n", ctx)
+    caller, ok := fuse.FromContext(ctx)
+    if !ok {
+        log.Println("Caller information not available!")
+    } else {
+        log.Printf("Caller info: UID{%v}, GID{%v}\n", caller.Uid, caller.Gid)
+    }
+    f.RefNum = hashing.UpdateEntry(f.CurrentHash, f.RefNum, f.attr, st, caller.Uid, caller.Gid)
+
+    // Finally, perform the write
+    n, e := syscall.Pwrite(f.fdesc, data, off)
+
+    return uint32(n), fs.ToErrno(e)
 }
 
 // FUSE's version of a close

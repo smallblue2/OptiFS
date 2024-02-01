@@ -48,7 +48,7 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
-	hashing.RetrieveMap() // retrieve the hashmap
+	//hashing.RetrieveMap() // retrieve the hashmap
 
 	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
@@ -56,10 +56,12 @@ func main() {
 	log.Println("=========================================================")
 
 	// when we are shutting down the filesystem, save the hashmap
-	defer func() {
-        hashing.PrintMap()
-        hashing.SaveMap(hashing.FileHashes)
-	}()
+	//defer func() {
+    //    hashing.PrintMap()
+    //    hashing.SaveMap(hashing.FileHashes)
+	//}()
+
+    hashing.PrintMap()
 
 
 	server.Wait()
