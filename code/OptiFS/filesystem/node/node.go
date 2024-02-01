@@ -178,31 +178,13 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
     log.Println("Filehandle is nil, using node!")
 
     // Try and get an entry in our own custom system
-    var defaultHash [64]byte // For checking to see if our CurrentHash is defined or not
-    if n.currentHash != defaultHash && n.refNum != 0 { // If we have values defined
-        if err, metadata := hashing.LookupEntry(n.currentHash, n.refNum); err == nil {
-            log.Println("Getting custom attributes!")
-            // Fill the AttrOut with our custom attributes stored in our hash
-            out.Attr.Size = uint64(metadata.Size)
-            out.Attr.Blocks = uint64(metadata.Blocks)
-            out.Attr.Atime = uint64(metadata.Atim.Sec)
-            out.Attr.Atimensec = uint32(metadata.Atim.Nsec)
-            out.Attr.Mtime = uint64(metadata.Mtim.Sec)
-            out.Attr.Mtimensec = uint32(metadata.Mtim.Nsec)
-            out.Attr.Ctime = uint64(metadata.Ctim.Sec)
-            out.Attr.Ctimensec = uint32(metadata.Ctim.Nsec)
-            out.Attr.Mode = metadata.Mode
-            out.Attr.Nlink = uint32(metadata.Nlink)
-            out.Attr.Uid = uint32(metadata.Uid)
-            out.Attr.Gid = uint32(metadata.Gid)
-            out.Attr.Rdev = uint32(metadata.Rdev)
-            out.Attr.Blksize = uint32(metadata.Blksize)
-
-            return fs.OK
-        }
+    herr, metadata := hashing.LookupEntry(n.currentHash, n.refNum)
+    if herr == nil {
+        hashing.FillAttrOut(metadata, out)
+        return fs.OK
     }
 
-    log.Println("Couldn't find an entry, statting the underlying file!")
+    log.Println("Statting underlying node")
 
     // OTHERWISE, just stat the node
 	path := n.path()
@@ -236,20 +218,11 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
     // OTHERWISE, first try and update our own custom metadata system
     var foundEntry bool
-    var customMetadata hashing.MapEntryMetadata
 
     // Check to see if we can find an entry in our hashmap
-    var defaultHash [64]byte // For checking to see if our CurrentHash is defined or not
-    if n.currentHash != defaultHash && n.refNum != 0 { // If we have values defined
-        if err, metadata := hashing.LookupEntry(n.currentHash, n.refNum); err == nil {
-            log.Println("Found custom metadata entry")
-            foundEntry = true
-            customMetadata = metadata
-        }
-    }
-
-    if foundEntry == false {
-        log.Println("Couldn't find custom metadata entry")
+    herr, customMetadata := hashing.LookupEntry(n.currentHash, n.refNum)
+    if herr == nil {
+        foundEntry = true
     }
 
 	// If we need to - Manually change the underlying attributes ourselves
@@ -259,8 +232,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 	if mode, ok := in.GetMode(); ok {
         // Try and modify our custom metadata system first
         if foundEntry {
-            customMetadata.Mode = mode
-            log.Println("Updated custom mode")
+            hashing.UpdateMode(customMetadata, &mode)
         // Otherwise just update the underlying node's mode
         } else {
             // Change the mode to the new mode
@@ -287,14 +259,19 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		}
         // Try and update our custom metadata system isntead
         if foundEntry {
+            // As our update function works on optional pointers, convert
+            // the safeguarding to work with pointers
+            var saferUID *uint32
+            var saferGID *uint32
             if safeUID != -1 {
-                customMetadata.Uid = uint32(safeUID)
-                log.Println("Updated custom UID")
+                tmp := uint32(safeUID)
+                saferUID = &tmp
             }
             if safeGID != -1 {
-                customMetadata.Gid = uint32(safeGID)
-                log.Println("Updated custom GID")
+                tmp := uint32(safeGID)
+                saferGID = &tmp
             }
+            hashing.UpdateOwner(customMetadata, saferUID, saferGID)
         // Otherwise, just update the underlying node instead
         } else {
             // Chown these values
@@ -330,14 +307,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
         // Try and update our own custom metadata system first
         if foundEntry {
-            if ap != nil {
-                customMetadata.Atim = times[0]
-                log.Println("Updated custom ATime")
-            }
-            if mp != nil {
-                customMetadata.Mtim = times[1]
-                log.Println("Updated custom MTime")
-            }
+            hashing.UpdateTime(customMetadata, &times[0], &times[1], nil)
         // OTHERWISE update the underlying file
         } else {
             // Call the utimenano syscall, ensuring to convert our time array
@@ -353,8 +323,8 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 	if size, ok := in.GetSize(); ok {
         // First try and change the custom metadata system
         if foundEntry {
-            customMetadata.Size = int64(size)
-            log.Println("Updated custom size")
+            tmp := int64(size)
+            hashing.UpdateSize(customMetadata, &tmp)
         } else {
             if err := syscall.Truncate(path, int64(size)); err != nil {
                 return fs.ToErrno(err)
@@ -368,20 +338,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
     if foundEntry {
         log.Println("Reflecting custom attributes changes!")
         // Fill the AttrOut with our custom attributes stored in our hash
-        out.Attr.Size = uint64(customMetadata.Size)
-        out.Attr.Blocks = uint64(customMetadata.Blocks)
-        out.Attr.Atime = uint64(customMetadata.Atim.Sec)
-        out.Attr.Atimensec = uint32(customMetadata.Atim.Nsec)
-        out.Attr.Mtime = uint64(customMetadata.Mtim.Sec)
-        out.Attr.Mtimensec = uint32(customMetadata.Mtim.Nsec)
-        out.Attr.Ctime = uint64(customMetadata.Ctim.Sec)
-        out.Attr.Ctimensec = uint32(customMetadata.Ctim.Nsec)
-        out.Attr.Mode = customMetadata.Mode
-        out.Attr.Nlink = uint32(customMetadata.Nlink)
-        out.Attr.Uid = uint32(customMetadata.Uid)
-        out.Attr.Gid = uint32(customMetadata.Gid)
-        out.Attr.Rdev = uint32(customMetadata.Rdev)
-        out.Attr.Blksize = uint32(customMetadata.Blksize)
+        hashing.FillAttrOut(customMetadata, out)
 
         return fs.OK
     }

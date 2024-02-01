@@ -5,9 +5,7 @@ package file
 import (
 	"context"
 	"filesystem/hashing"
-	//"hash"
 
-	//"filesystem/hashing"
 	"log"
 	"sync"
 	"syscall"
@@ -15,7 +13,6 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	//"golang.org/x/sys/unix"
 )
 
 // represents open files in the system, use for handling filehandles
@@ -113,39 +110,20 @@ func (f *OptiFSFile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Err
 
     log.Println("FILE || entered GETATTR")
 
-    // Try and get an entry in our own custom system
-    var defaultHash [64]byte // For checking to see if our CurrentHash is defined or not
-    if f.CurrentHash != defaultHash && f.RefNum != 0 { // If we have values defined
-        if err, metadata := hashing.LookupEntry(f.CurrentHash, f.RefNum); err == nil {
-            log.Println("Getting custom attributes!")
-            // Fill the AttrOut with our custom attributes stored in our hash
-            out.Attr.Size = uint64(metadata.Size)
-            out.Attr.Blocks = uint64(metadata.Blocks)
-            out.Attr.Atime = uint64(metadata.Atim.Sec)
-            out.Attr.Atimensec = uint32(metadata.Atim.Nsec)
-            out.Attr.Mtime = uint64(metadata.Mtim.Sec)
-            out.Attr.Mtimensec = uint32(metadata.Mtim.Nsec)
-            out.Attr.Ctime = uint64(metadata.Ctim.Sec)
-            out.Attr.Ctimensec = uint32(metadata.Ctim.Nsec)
-            out.Attr.Mode = metadata.Mode
-            out.Attr.Nlink = uint32(metadata.Nlink)
-            out.Attr.Uid = uint32(metadata.Uid)
-            out.Attr.Gid = uint32(metadata.Gid)
-            out.Attr.Rdev = uint32(metadata.Rdev)
-            out.Attr.Blksize = uint32(metadata.Blksize)
-
-            return fs.OK
-        }
+    // If we can, fill attributes from our filehash
+    err, metadata := hashing.LookupEntry(f.CurrentHash, f.RefNum)
+    if err == nil {
+        hashing.FillAttrOut(metadata, out)
+        return fs.OK
     }
 
     // OTHERWISE, just stat the file
-    log.Println("Couldn't find an entry, statting the underlying file!")
 
 	s := syscall.Stat_t{}
-	err := syscall.Fstat(f.fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
+	serr := syscall.Fstat(f.fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
 
-	if err != nil {
-		return fs.ToErrno(err)
+	if serr != nil {
+		return fs.ToErrno(serr)
 	}
 
 	out.FromStat(&s) // fill the attr into struct if no errors
@@ -160,16 +138,11 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
     log.Println("FILE || entered SETATTR")
 
     var foundEntry bool
-    var customMetadata hashing.MapEntryMetadata
 
     // Check to see if we can find an entry in our hashmap
-    var defaultHash [64]byte // For checking to see if our CurrentHash is defined or not
-    if f.CurrentHash != defaultHash && f.RefNum != 0 { // If we have values defined
-        if err, metadata := hashing.LookupEntry(f.CurrentHash, f.RefNum); err == nil {
-            log.Println("Found custom metadata entry")
-            foundEntry = true
-            customMetadata = metadata
-        }
+    err, customMetadata := hashing.LookupEntry(f.CurrentHash, f.RefNum)
+    if err == nil {
+        foundEntry = true
     }
 
 	// Check to see if we need to change the mode
@@ -178,8 +151,7 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
         
         // Try our custom metadata system first
         if foundEntry {
-            log.Println("Updated custom mode")
-            customMetadata.Mode = mode
+            hashing.UpdateMode(customMetadata, &mode)
         // Otherwise just attempt the underlying file
         } else {
             log.Println("Updated underlying mode")
@@ -205,14 +177,19 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 		}
         // Try our custom metadata system first
         if foundEntry {
+            // As our update function works on optional pointers, convert
+            // the safeguarding to work with pointers
+            var saferUID *uint32
+            var saferGID *uint32
             if safeUID != -1 {
-                customMetadata.Uid = uint32(safeUID)
-                log.Println("Updated custom UID")
+                tmp := uint32(safeUID)
+                saferUID = &tmp
             }
             if safeGID != -1 {
-                customMetadata.Gid = uint32(safeGID)
-                log.Println("Updated custom GID")
+                tmp := uint32(safeGID)
+                saferGID = &tmp
             }
+            hashing.UpdateOwner(customMetadata, saferUID, saferGID)
         // Otherwise do the underlying node
         } else {
             // Chown these values
@@ -249,14 +226,7 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 
         // Check to see if we can update our custom metadata system first
         if foundEntry {
-            if ap != nil {
-                customMetadata.Atim = times[0]
-                log.Println("Updated custom ATime")
-            }
-            if mp != nil {
-                customMetadata.Mtim = times[1]
-                log.Println("Updated custom MTime")
-            }
+            hashing.UpdateTime(customMetadata, &times[0], &times[1], nil)
         // OTHERWISE update the underlying file
         } else {
             // BELOW LINE IS FROM `fs` package, hanwen - TODO: REFERENCE PROPERLY
@@ -273,8 +243,8 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 	if sz, ok := in.GetSize(); ok {
         // First try and change the custom metadata system
         if foundEntry {
-            customMetadata.Size = int64(sz)
-            log.Println("Updated custom size")
+            tmp := int64(sz)
+            hashing.UpdateSize(customMetadata, &tmp)
         } else {
             // Change the size
             if err := fs.ToErrno(syscall.Ftruncate(f.fdesc, int64(sz))); err != 0 {
@@ -290,34 +260,44 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-
-    var st syscall.Stat_t
-    err := syscall.Fstat(f.fdesc, &st)
-    if err != nil {
-        return 0, fs.ToErrno(err)
-    }
-
-    // TODO: Hash the content and update the metadata
     
     // Hash the current contents
     f.CurrentHash = hashing.HashContents(data, f.flags)
     // Check to see if it's unique
     isUnique, _ := hashing.IsUnique(f.CurrentHash)
-    log.Printf("File is unique: %v\n", isUnique)
-    // Update OR create the entry TODO: I think it should only be created in Create syscall, not write.
-    log.Printf("Context: %+v\n", ctx)
-    caller, ok := fuse.FromContext(ctx)
-    if !ok {
-        log.Println("Caller information not available!")
+
+    // TODO: I think it should only be created in Create syscall, not write - or maybe not idk, need to think
+
+    var hashEntry hashing.MapEntry
+    // If it's unique - CREATE a new MapEntry
+    if isUnique {
+        hashEntry = hashing.CreateMapEntry(f.CurrentHash)
+    // If it already exists, simply retrieve it
     } else {
-        log.Printf("Caller info: UID{%v}, GID{%v}\n", caller.Uid, caller.Gid)
+        hashEntry = hashing.FileHashes[f.CurrentHash]
     }
-    f.RefNum = hashing.UpdateEntry(f.CurrentHash, f.RefNum, f.attr, st, caller.Uid, caller.Gid)
 
-    // Finally, perform the write
-    n, e := syscall.Pwrite(f.fdesc, data, off)
+    // Create a new MapEntryMetadata object
+    refNum, metadata := hashing.CreateMapEntryMetadata(hashEntry)
+    // Set the file handle's refnum to the entry
+    f.RefNum = refNum
 
-    return uint32(n), fs.ToErrno(e)
+    // Perform the write
+    // TODO: Set up links if non-unique NEEDS TO BE ATOMIC
+    numOfBytesWritten, werr := syscall.Pwrite(f.fdesc, data, off)
+
+    // Fill in the MapEntryMetadata object 
+    // TODO: Prioritise previous MapEntryMetadata data before statting underlying file
+    var st syscall.Stat_t
+    serr := syscall.Fstat(f.fdesc, &st)
+    if serr != nil {
+        return 0, fs.ToErrno(serr)
+    }
+
+    hashing.STRUCT_FullUpdateEntry(metadata, st)
+
+
+    return uint32(numOfBytesWritten), fs.ToErrno(werr)
 }
 
 // FUSE's version of a close
