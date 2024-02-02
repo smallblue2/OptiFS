@@ -268,7 +268,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 
     // TODO: I think it should only be created in Create syscall, not write - or maybe not idk, need to think
 
-    var hashEntry hashing.MapEntry
+    var hashEntry *hashing.MapEntry
     // If it's unique - CREATE a new MapEntry
     if isUnique {
         hashEntry = hashing.CreateMapEntry(f.CurrentHash)
@@ -283,6 +283,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
     f.RefNum = refNum
 
     // Perform the write
+
     // TODO: Set up links if non-unique NEEDS TO BE ATOMIC
     numOfBytesWritten, werr := syscall.Pwrite(f.fdesc, data, off)
 
@@ -294,7 +295,8 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
         return 0, fs.ToErrno(serr)
     }
 
-    hashing.STRUCT_FullUpdateEntry(metadata, st)
+    hashing.STRUCT_FullUpdateEntry(metadata, &st)
+    log.Printf("Metadata after being updated: %+v\n", metadata)
 
 
     return uint32(numOfBytesWritten), fs.ToErrno(werr)
