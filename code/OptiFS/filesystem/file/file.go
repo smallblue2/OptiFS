@@ -111,7 +111,7 @@ func (f *OptiFSFile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Err
     log.Println("FILE || entered GETATTR")
 
     // If we can, fill attributes from our filehash
-    err, metadata := hashing.LookupEntry(f.CurrentHash, f.RefNum)
+    err, metadata := hashing.LookupMetadataEntry(f.CurrentHash, f.RefNum)
     if err == nil {
         hashing.FillAttrOut(metadata, out)
         return fs.OK
@@ -140,7 +140,7 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
     var foundEntry bool
 
     // Check to see if we can find an entry in our hashmap
-    err, customMetadata := hashing.LookupEntry(f.CurrentHash, f.RefNum)
+    err, customMetadata := hashing.LookupMetadataEntry(f.CurrentHash, f.RefNum)
     if err == nil {
         foundEntry = true
     }
@@ -295,7 +295,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
         return 0, fs.ToErrno(serr)
     }
 
-    hashing.STRUCT_FullUpdateEntry(metadata, &st)
+    hashing.STRUCT_FullMetadataEntryUpdate(metadata, &st)
     log.Printf("Metadata after being updated: %+v\n", metadata)
 
 

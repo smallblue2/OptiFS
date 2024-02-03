@@ -178,7 +178,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
     log.Println("Filehandle is nil, using node!")
 
     // Try and get an entry in our own custom system
-    herr, metadata := hashing.LookupEntry(n.currentHash, n.refNum)
+    herr, metadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
     if herr == nil {
         hashing.FillAttrOut(metadata, out)
         return fs.OK
@@ -220,7 +220,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
     var foundEntry bool
 
     // Check to see if we can find an entry in our hashmap
-    herr, customMetadata := hashing.LookupEntry(n.currentHash, n.refNum)
+    herr, customMetadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
     if herr == nil {
         foundEntry = true
     }
@@ -495,7 +495,11 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 
 // Unlinks (removes) a file
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
-	//log.Printf("UNLINK performed on %v from node %v\n", name, n.path())
+	log.Printf("UNLINK performed on %v from node %v\n", name, n.path())
+
+    // Remove node entry from the main hashmap
+    hashing.RemoveMetadata(n.currentHash, n.refNum)
+
 	filePath := filepath.Join(n.path(), name)
 	err := syscall.Unlink(filePath)
 	return fs.ToErrno(err)

@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/hanwen/go-fuse/v2/fs"
 	"lukechampine.com/blake3"
 )
 
@@ -48,9 +47,31 @@ type MapEntryMetadata struct {
 	X__unused [3]int64
 }
 
-// key = inode number
-// value = hash
-var FileHashes = make(map[[64]byte]*MapEntry)
+type NodeInfo struct {
+    ContentHash [64]byte
+    RefNum uint64
+}
+
+// This is the hash that contains all custom metadata, and is indexable through file content hashed and reference numbers
+var CustomMetadataHash = make(map[[64]byte]*MapEntry)
+
+// This is the hash that contains node paths as a key and ContentHash's and RefNum. Used to keep node info persistent
+var NodePersistenceHash = make(map[string]*NodeInfo)
+
+// Stores information about a node by its path
+func StoreNodeInfo(path string, contentHash [64]byte, refNum uint64) {
+    NodePersistenceHash[path] = &NodeInfo{ContentHash: contentHash, RefNum: refNum}
+}
+
+// Retrieves information about a node by its path
+func RetrieveNodeInfo(path string) (error, [64]byte, uint64) {
+    info, ok := NodePersistenceHash[path]
+    if !ok {
+        return errors.New("No node info available for path"), [64]byte{}, 0
+    }
+
+    return nil, info.ContentHash, info.RefNum
+}
 
 func HashContents(data []byte, flags uint32) [64]byte {
 
@@ -81,7 +102,7 @@ func HashContents(data []byte, flags uint32) [64]byte {
 // Returns a bool for whether the contentHash can be found and also returns the underlying Inode
 func IsUnique(contentHash [64]byte) (bool, uint32) {
 	// Check to see if there's an entry for the contentHash and refNum above
-    entry, exists := FileHashes[contentHash]
+    entry, exists := CustomMetadataHash[contentHash]
     // If it doesn't exist
     if !exists {
         log.Println("Content is unique!")
@@ -94,7 +115,7 @@ func IsUnique(contentHash [64]byte) (bool, uint32) {
 }
 
 // Retrieves node metadata for a hash and refnum provided. Returns an error if it cannot be found
-func LookupEntry (contentHash [64]byte, refNum uint64) (error, *MapEntryMetadata) {
+func LookupMetadataEntry (contentHash [64]byte, refNum uint64) (error, *MapEntryMetadata) {
 
     log.Println("Looking up a contentHash and refNum...")
 
@@ -106,7 +127,7 @@ func LookupEntry (contentHash [64]byte, refNum uint64) (error, *MapEntryMetadata
     }
 
     // Now actually query the hashmap
-    if contentEntry, ok := FileHashes[contentHash]; ok {
+    if contentEntry, ok := CustomMetadataHash[contentHash]; ok {
         if nodeMetadata, ok := contentEntry.EntryList[refNum]; ok {
             return nil, nodeMetadata
         }
@@ -115,14 +136,94 @@ func LookupEntry (contentHash [64]byte, refNum uint64) (error, *MapEntryMetadata
     return errors.New("Couldn't find entry!"), &MapEntryMetadata{}
 }
 
+// Removes a MapEntryMetadata object based on contenthash and refnum provided. Also handles if this potentially creates
+// an empty MapEntry struct
+func RemoveMetadata(contentHash [64]byte, refNum uint64) error {
+
+    log.Printf("Removing Metadata for refNum{%v}, contentHash{%+v}\n", refNum, contentHash)
+
+    // Check to see if an entry exists
+    err, entry, _ := RetrieveMapEntryAndMetadataFromHashAndRef(contentHash, refNum)
+    if err != nil {
+        log.Println("Couldn't find an entry!")
+        return err
+    }
+    log.Println("Found an entry!")
+
+    // Delete the metadata from our entry
+    delete(entry.EntryList, refNum)
+    // Reflect these changes in the MapEntry
+    entry.ReferenceCount--
+
+    log.Println("Deleted metadata, checking to see if we need to delete the MapEntry")
+
+    // Check to see if the MapEntry is empty
+    if entry.ReferenceCount == 0 {
+        // If it is, delete the whole entry
+        delete(CustomMetadataHash, contentHash)
+        log.Println("Deleted MapEntry")
+    }
+    log.Println("Finished removing metadata")
+
+    return nil
+}
+
+// Retrieves the MapEntry struct from which the Metadata entry struct that the refNum and contentHash links to
+func RetrieveMapEntryFromHashAndRef(contentHash [64]byte, refNum uint64) (error, *MapEntry) {
+    
+    log.Println("Looking up MapEntry from Hash and Ref")
+
+    // First check for default values
+    var defaultByteArray [64]byte
+    if contentHash == defaultByteArray || refNum == 0 {
+        log.Println("Default values detected, no MapEntry available")
+        return errors.New("Default values detected"), &MapEntry{}
+    }
+
+    // Now actually query the hashmap
+    if contentEntry, ok := CustomMetadataHash[contentHash]; ok {
+        if _, ok := contentEntry.EntryList[refNum]; ok {
+            log.Println("Found a MapEntry for valid hash and refnum!")
+            return nil, contentEntry
+        }
+    }
+
+    log.Println("Couldn't find a MapEntry for provided hash and refnum")
+    return errors.New("Couldn't find entry!"), &MapEntry{}
+}
+
+// Retrieves the MapEntry and MapEntryMetadata struct from which the refNum and contentHash links to
+func RetrieveMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, refNum uint64) (error, *MapEntry, *MapEntryMetadata) {
+    
+    log.Println("Looking up MapEntry and MapEntryMetadata from Hash and Ref")
+
+    // First check for default values
+    var defaultByteArray [64]byte
+    if contentHash == defaultByteArray || refNum == 0 {
+        log.Println("Default values detected, no MapEntry or MapEntryData available")
+        return errors.New("Default values detected"), &MapEntry{}, &MapEntryMetadata{}
+    }
+
+    // Now actually query the hashmap
+    if contentEntry, ok := CustomMetadataHash[contentHash]; ok {
+        if metadataEntry, ok := contentEntry.EntryList[refNum]; ok {
+            log.Println("Found a MapEntry and MapEntryMetadata for valid hash and refnum!")
+            return nil, contentEntry, metadataEntry
+        }
+    }
+
+    log.Println("Couldn't find a MapEntry and MapEntryMetadata for provided hash and refnum")
+    return errors.New("Couldn't find entry!"), &MapEntry{}, &MapEntryMetadata{}
+}
+
 // Updates a MapEntryMetadata object corresponding to the contentHash and refNum provided
 //
 // If refNum or contentHash is invalid, it returns an error
-func SAFE_FullUpdateEntry(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t) error {
+func SAFE_FullMetadataEntryUpdate(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t) error {
 
     log.Println("Updating metadata through lookup...")
     // Ensure that contentHash and refNum is valid
-    err, metadata := LookupEntry(contentHash, refNum)
+    err, metadata := LookupMetadataEntry(contentHash, refNum)
     if err != nil {
         log.Println("Couldn't find the metadata struct")
         return err
@@ -151,12 +252,12 @@ func SAFE_FullUpdateEntry(contentHash [64]byte, refNum uint64, unstableAttr *sys
     log.Printf("metadata: %+v\n", metadata)
     log.Println("Updated all custom metadata attributes through lookup")
 
-    return fs.OK
+    return nil
 }
 
 
 // Updates a MapEntryMetadata object corresponding to the MapEntryMetadata provided
-func STRUCT_FullUpdateEntry(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t) error {
+func STRUCT_FullMetadataEntryUpdate(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t) error {
 
     log.Println("Updating metadata through struct...")
     log.Printf("unstableAttr: %+v\n", unstableAttr)
@@ -180,7 +281,7 @@ func STRUCT_FullUpdateEntry(metadata *MapEntryMetadata, unstableAttr *syscall.St
     log.Printf("metadata: %+v\n", metadata)
     log.Println("Updated all custom metadata attributes through struct")
 
-    return fs.OK
+    return nil
 }
 
 // Function updates the UID and GID of a MapEntryMetadata
@@ -194,7 +295,7 @@ func UpdateOwner(metadata *MapEntryMetadata, uid, gid *uint32) error {
         (*metadata).Gid = *gid
         log.Println("Updated custom GID")
     }
-    return fs.OK
+    return nil
 }
 
 // Function updates the time data of a MapEntryMetadata
@@ -212,7 +313,7 @@ func UpdateTime(metadata *MapEntryMetadata, atim, mtim, ctim *syscall.Timespec) 
         (*metadata).Ctim = *ctim
         log.Println("Updated custom CTime")
     }
-    return fs.OK
+    return nil
 }
 
 // Function updates inode and device fields of a MapEntryMetadata
@@ -226,7 +327,7 @@ func UpdateLocation(metadata *MapEntryMetadata, inode, dev *uint64) error {
         (*metadata).Dev = *dev
         log.Println("Updated custom Device")
     }
-    return fs.OK
+    return nil
 }
 
 // Function updates size field of a MapEntryMetadata
@@ -236,7 +337,7 @@ func UpdateSize(metadata *MapEntryMetadata, size *int64) error {
         (*metadata).Size = *size
         log.Println("Updated custom Size")
     }
-    return fs.OK
+    return nil
 }
 
 // Function updates link count of a MapEntryMetadata
@@ -246,7 +347,7 @@ func UpdateLinkCount(metadata *MapEntryMetadata, linkCount *uint64) error {
         (*metadata).Nlink = *linkCount
         log.Println("Updated custom Nlink")
     }
-    return fs.OK
+    return nil
 }
 
 // Function updates mode of a MapEntryMetadata
@@ -256,7 +357,7 @@ func UpdateMode(metadata *MapEntryMetadata, mode *uint32) error {
         (*metadata).Mode = *mode
         log.Println("Updated custom Mode")
     }
-    return fs.OK
+    return nil
 }
 
 // Function update C++ struct padding optimisation variables - not sure if they're used or needed
@@ -270,7 +371,7 @@ func UpdateWeirdCPPStuff(metadata *MapEntryMetadata, X__pad0 *int32, X__unused *
         (*metadata).X__unused = *X__unused
         log.Println("Updated custom X__unused")
     }
-    return fs.OK
+    return nil
 }
 
 // Function fills the AttrOut struct with its own information
@@ -300,7 +401,7 @@ func FillAttrOut(metadata *MapEntryMetadata, out *fuse.AttrOut) {
 // Creates a new MapEntry in the main hash map when provided with a contentHash
 // If the MapEntry already exists, we will simply pass back the already created MapEntry
 func CreateMapEntry(contentHash [64]byte) *MapEntry {
-    if entry, ok := FileHashes[contentHash]; ok {
+    if entry, ok := CustomMetadataHash[contentHash]; ok {
         log.Println("MapEntry already exists, returning it")
         return entry
     }
@@ -319,7 +420,7 @@ func CreateMapEntry(contentHash [64]byte) *MapEntry {
     log.Println("Placing MapEntry in FileHashes")
 
     // Place the new MapEntry inside the file hash
-    FileHashes[contentHash] = newEntry
+    CustomMetadataHash[contentHash] = newEntry
     return newEntry
 }
 
@@ -346,19 +447,19 @@ func CreateMapEntryMetadata(entry *MapEntry) (refNum uint64, newEntry *MapEntryM
     return (*entry).IndexCounter, newEntry
 }
 
-
+// Function saves the custom metadata hashmap
 // since a hashmap will be deleted when the system is restarted (stored in RAM)
 // we encode the hashmap and store it in a file saved on disk to be loaded when OptiFS starts
-func SaveMap(hashmap map[[64]byte]*MapEntry) error {
-	log.Println("SAVING HASHMAP")
-	dest := "hashing/OptiFSHashSave.gob"
+func SaveMetadataMap(hashmap map[[64]byte]*MapEntry) error {
+	log.Println("SAVING METADATA HASHMAP")
+	dest := "hashing/OptiFSMetadataSave.gob"
 
 	// create the file if it doesn't exist, truncate it if it does
 	// we assume nobody will be calling this file, as it is a very unique name
 	file, err := os.Create(dest)
 
 	if err != nil {
-		log.Println("ERROR WITH FILE - HASHMAP")
+		log.Println("ERROR WITH FILE - METADATA HASHMAP")
 		return err
 	}
 
@@ -368,7 +469,7 @@ func SaveMap(hashmap map[[64]byte]*MapEntry) error {
 	eErr := encode.Encode(hashmap) // encode the hashmap into binary, put it in the file
 
 	if eErr != nil {
-		log.Println("ERROR WITH ENCODER - HASHMAP")
+		log.Println("ERROR WITH ENCODER - METADATA HASHMAP")
 		return eErr
 	}
 
@@ -376,9 +477,9 @@ func SaveMap(hashmap map[[64]byte]*MapEntry) error {
 }
 
 // retrieve the encoded hashmap from the file when the system restarts
-func RetrieveMap() error {
-	log.Println("RETRIEVING HASHMAP")
-	dest := "hashing/OptiFSHashSave.gob"
+func RetrieveMetadataMap() error {
+	log.Println("RETRIEVING METADATA HASHMAP")
+	dest := "hashing/OptiFSMetadataSave.gob"
 
 	file, err := os.Open(dest) // open where the hashmap was encoded
 
@@ -389,10 +490,10 @@ func RetrieveMap() error {
 	defer file.Close() // don't let the file close
 
 	decode := gob.NewDecoder(file)     // set the file that we opened to the decoder
-	dErr := decode.Decode(&FileHashes) // decode the file back into the hashmap
+	dErr := decode.Decode(&CustomMetadataHash) // decode the file back into the hashmap
 
 	if dErr != nil {
-		log.Println("ERROR WITH DECODER - HASHMAP")
+		log.Println("ERROR WITH DECODER - METADATA HASHMAP")
 		return dErr
 	}
 
@@ -400,9 +501,62 @@ func RetrieveMap() error {
 }
 
 // printing hashmap for testing purposes
-func PrintMap() {
-	log.Println("PRINTING HASHMAP")
-	for key, value := range FileHashes {
+func PrintMetadataMap() {
+	log.Println("PRINTING METADATA HASHMAP")
+	for key, value := range CustomMetadataHash {
 		log.Printf("Key: %x, Value: %v\n", key, value)
 	}
+}
+
+// Function saves the node persistence hash into a Go binary (.gob) file
+// since a hashmap will be deleted when the system is restarted (stored in RAM)
+// we encode the hashmap and store it in a file saved on disk to be loaded when OptiFS starts
+func SaveNodeInfoMap(hashmap map[string]*NodeInfo) error {
+	log.Println("SAVING NODE INFO HASHMAP")
+	dest := "hashing/OptiFSNodeSave.gob"
+
+	// create the file if it doesn't exist, truncate it if it does
+	// we assume nobody will be calling this file, as it is a very unique name
+	file, err := os.Create(dest)
+
+	if err != nil {
+		log.Println("ERROR WITH FILE - NODE HASHMAP")
+		return err
+	}
+
+	defer file.Close() // don't let the file close
+
+	encode := gob.NewEncoder(file) // set the file that we created to the encoder
+	eErr := encode.Encode(hashmap) // encode the hashmap into binary, put it in the file
+
+	if eErr != nil {
+		log.Println("ERROR WITH ENCODER - NODE HASHMAP")
+		return eErr
+	}
+
+	return nil
+}
+
+// retrieve the encoded node info hashmap from the file when the system restarts
+func RetrieveNodeInfoMap() error {
+	log.Println("RETRIEVING NODE HASHMAP")
+	dest := "hashing/OptiFSNodeSave.gob"
+
+	file, err := os.Open(dest) // open where the hashmap was encoded
+
+	if err != nil {
+		return err
+	}
+
+	defer file.Close() // don't let the file close
+
+	decode := gob.NewDecoder(file)     // set the file that we opened to the decoder
+	dErr := decode.Decode(&NodePersistenceHash) // decode the file back into the hashmap
+
+	if dErr != nil {
+		log.Println("ERROR WITH DECODER - NODE HASHMAP")
+		return dErr
+	}
+
+	return nil
 }
