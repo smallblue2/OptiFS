@@ -274,7 +274,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
         hashEntry = hashing.CreateMapEntry(f.CurrentHash)
     // If it already exists, simply retrieve it
     } else {
-        hashEntry = hashing.FileHashes[f.CurrentHash]
+        hashEntry = hashing.CustomMetadataHash[f.CurrentHash]
     }
 
     // Create a new MapEntryMetadata object

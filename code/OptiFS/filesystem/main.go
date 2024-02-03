@@ -61,7 +61,7 @@ func main() {
     //    hashing.SaveMap(hashing.FileHashes)
 	//}()
 
-    hashing.PrintMap()
+    hashing.PrintMetadataMap()
 
 
 	server.Wait()
