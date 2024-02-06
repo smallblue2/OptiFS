@@ -6,8 +6,6 @@ import (
 	"log"
 	"os"
 	"path"
-
-	"filesystem/hashing"
 	"filesystem/node"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -60,9 +58,6 @@ func main() {
     //    hashing.PrintMap()
     //    hashing.SaveMap(hashing.FileHashes)
 	//}()
-
-    hashing.PrintMetadataMap()
-
 
 	server.Wait()
 }

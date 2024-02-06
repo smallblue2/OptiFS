@@ -3,7 +3,8 @@ package node
 import (
 	"context"
 	"filesystem/file"
-	"filesystem/hashing"
+	"filesystem/metadata"
+	"filesystem/permissions"
 	"log"
 	"os"
 	"path/filepath"
@@ -123,11 +124,11 @@ func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
 
 // Updates the node's metadata info, such as the contentHash, reference number, and
 // the persistent info in the NodePersistenceHash
-func (n *OptiFSNode) updateMetadataInfo(contentHash [64]byte, refNum uint64) {
+func (n *OptiFSNode) updateNodeContentHashAndRefNum(contentHash [64]byte, refNum uint64) {
 	n.currentHash = contentHash
 	n.refNum = refNum
 	path := n.path()
-	hashing.StoreNodeInfo(path, n.currentHash, n.refNum)
+	metadata.StoreNodeInfo(path, n.currentHash, n.refNum)
 	log.Printf("Node (%v) stored currentHash (%+v) and refNum (%+v)\n", path, n.currentHash, n.refNum)
 }
 
@@ -174,6 +175,7 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 
 // opens a stream of dir entries,
 func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+
 	return fs.NewLoopbackDirStream(n.path())
 }
 
@@ -188,17 +190,23 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 
 	log.Println("Filehandle is nil, using node!")
 
+	path := n.path()
+
 	// Try and get an entry in our own custom system
-	herr, metadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
-	if herr == nil {
-		hashing.FillAttrOut(metadata, out)
+	err1, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	if err1 == nil { // If it exists
+		metadata.FillAttrOut(fileMetadata, out)
 		return fs.OK
 	}
+    err2, dirMetadata := metadata.LookupDirMetadata(n.GetAttr().Ino)
+    if err2 == nil {
+        metadata.FillAttrOut(dirMetadata, out)
+        return fs.OK
+    }
 
 	log.Println("Statting underlying node")
 
 	// OTHERWISE, just stat the node
-	path := n.path()
 	var err error
 	s := syscall.Stat_t{}
 	// IF we're dealing with the root, stat it directly as opposed to handling symlinks
@@ -227,25 +235,34 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		return f.(fs.FileSetattrer).Setattr(ctx, in, out)
 	}
 
-	// OTHERWISE, first try and update our own custom metadata system
-	var foundEntry bool
+	path := n.path()
 
-	// Check to see if we can find an entry in our hashmap
-	herr, customMetadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
-	if herr == nil {
-		foundEntry = true
+	// OTHERWISE, first try and update our own custom metadata system
+	var foundFileEntry bool
+    var foundDirEntry bool
+
+	// Check to see if we can find an entry in our node hashmap
+	err1, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	if err1 == nil {
+		foundFileEntry = true
 	}
+    // Also check to see if we can find an entry in our directory hashmap
+    err2, dirMetadata := metadata.LookupDirMetadata(n.GetAttr().Ino)
+    if err2 == nil {
+        foundDirEntry = true
+    }
 
 	// If we need to - Manually change the underlying attributes ourselves
-	path := n.path()
 
 	// If the mode needs to be changed
 	if mode, ok := in.GetMode(); ok {
 		// Try and modify our custom metadata system first
-		if foundEntry {
-			hashing.UpdateMode(customMetadata, &mode)
-			// Otherwise just update the underlying node's mode
-		} else {
+		if foundFileEntry {
+			metadata.UpdateMode(fileMetadata, &mode)
+        } else if foundDirEntry {
+            metadata.UpdateMode(dirMetadata, &mode)
+            // Otherwise, just handle the underlying node
+        } else {
 			// Change the mode to the new mode
 			if err := syscall.Chmod(path, mode); err != nil {
 				return fs.ToErrno(err)
@@ -269,7 +286,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 			safeGID = int(gid)
 		}
 		// Try and update our custom metadata system isntead
-		if foundEntry {
+		if foundFileEntry || foundDirEntry {
 			// As our update function works on optional pointers, convert
 			// the safeguarding to work with pointers
 			var saferUID *uint32
@@ -282,7 +299,11 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 				tmp := uint32(safeGID)
 				saferGID = &tmp
 			}
-			hashing.UpdateOwner(customMetadata, saferUID, saferGID)
+            if foundFileEntry {
+                metadata.UpdateOwner(fileMetadata, saferUID, saferGID)
+            } else if foundDirEntry {
+                metadata.UpdateOwner(dirMetadata, saferUID, saferGID)
+            }
 			// Otherwise, just update the underlying node instead
 		} else {
 			// Chown these values
@@ -317,8 +338,10 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		times[1] = fuse.UtimeToTimespec(mp)
 
 		// Try and update our own custom metadata system first
-		if foundEntry {
-			hashing.UpdateTime(customMetadata, &times[0], &times[1], nil)
+		if foundFileEntry {
+			metadata.UpdateTime(fileMetadata, &times[0], &times[1], nil)
+        } else if foundDirEntry {
+			metadata.UpdateTime(dirMetadata, &times[0], &times[1], nil)
 			// OTHERWISE update the underlying file
 		} else {
 			// Call the utimenano syscall, ensuring to convert our time array
@@ -333,10 +356,13 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 	// If we have a size to update, do so as well
 	if size, ok := in.GetSize(); ok {
 		// First try and change the custom metadata system
-		if foundEntry {
+		if foundFileEntry {
 			tmp := int64(size)
-			hashing.UpdateSize(customMetadata, &tmp)
-		} else {
+			metadata.UpdateSize(fileMetadata, &tmp)
+		} else if foundDirEntry {
+            tmp := int64(size)
+			metadata.UpdateSize(dirMetadata, &tmp)
+        } else {
 			if err := syscall.Truncate(path, int64(size)); err != nil {
 				return fs.ToErrno(err)
 			}
@@ -346,13 +372,19 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 	// Now reflect these changes in the out stream
 	// Use our custom datastruct if we can
-	if foundEntry {
+	if foundFileEntry {
 		log.Println("Reflecting custom attributes changes!")
 		// Fill the AttrOut with our custom attributes stored in our hash
-		hashing.FillAttrOut(customMetadata, out)
+		metadata.FillAttrOut(fileMetadata, out)
 
 		return fs.OK
-	}
+	} else if foundDirEntry {
+        log.Println("Reflecting custom dir attributes changes!")
+
+        metadata.FillAttrOut(dirMetadata, out)
+
+        return fs.OK
+    }
 
 	log.Println("Reflecting underlying attributes changes!")
 	stat := syscall.Stat_t{}
@@ -377,10 +409,10 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 
     // Check custom permissions for opening the file
     // Lookup metadata entry
-    herr, metadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
+    herr, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
     if herr == nil { // If we found custom metadata
         log.Println("Checking custom metadata for OPEN permission")
-        allowed := checkOpenPermissions(ctx, metadata, flags)
+        allowed := permissions.CheckOpenPermissions(ctx, fileMetadata, flags)
         if !allowed {
             log.Println("Not allowed!")
             return nil, 0, syscall.EACCES
@@ -396,92 +428,6 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	optiFile := file.NewOptiFSFile(fileDescriptor, n.GetAttr(), flags, n.currentHash, n.refNum)
 	//log.Println("Created a new loopback file")
 	return optiFile, flags, fs.OK
-}
-
-// Checks open flags against node permissions
-func checkOpenPermissions(ctx context.Context, metadata *hashing.MapEntryMetadata, flags uint32) bool {
-
-    // Extract the UID and GID from the context
-    caller, check := fuse.FromContext(ctx)
-    if !check {
-        log.Println("No caller info available")
-        return true
-    }
-    currentUID := uint32(caller.Uid)
-    currentGID := uint32(caller.Gid)
-
-    // Determine access writes based on the Mode
-    mode := metadata.Mode
-    allowed := true
-
-    // Check to see if we're reading and/or writing
-    readFlags := syscall.O_RDONLY | syscall.O_RDWR | syscall.O_SYNC
-    writeFlags := syscall.O_WRONLY | syscall.O_RDWR | syscall.O_APPEND | syscall.O_DSYNC | syscall.O_FSYNC | syscall.O_DIRECT
-
-    reading := flags&uint32(readFlags)
-    writing := flags&uint32(writeFlags)
-
-    isOwner := currentUID == metadata.Uid
-    isGroup := currentGID == metadata.Gid
-
-    // Check read permissions if necessary
-    if reading != 0 {
-        log.Println("Open requires reading permission")
-        // Check the read permissions
-        if isOwner { // IF we're the owner
-            log.Println("User is the owner")
-            if mode&syscall.S_IRUSR == 0 { // IF we're not allowed to read
-                log.Println("Reading is not allowed")
-                allowed = false
-            }
-            log.Println("Reading is allowed")
-        } else if isGroup { // IF we're in the group
-            log.Println("User is in the group")
-            if mode&syscall.S_IRGRP == 0 { // IF we're not allowed to read
-                log.Println("Reading is not allowed")
-                allowed = false
-            }
-            log.Println("Reading is allowed")
-        } else { // OTHERWISE we're other
-            log.Println("User is other")
-            if mode&syscall.S_IROTH == 0 { // IF we're not allowed to read
-                log.Println("Reading is not allowed")
-                allowed = false
-            }
-            log.Println("Reading is allowed")
-        }
-    }
-
-    // Check writing permissions if necessary
-    if writing != 0 {
-        log.Println("Open requires writing permission")
-        // Check the write permissions
-        if isOwner { // IF we're the owner
-            log.Println("User is the owner")
-            if mode&syscall.S_IWUSR == 0 { // IF we're not allowed to write
-                log.Println("Writing not allowed")
-                allowed = false
-            }
-            log.Println("Writing allowed")
-        } else if isGroup { // IF we're in the group
-            log.Println("User is in the group")
-            if mode&syscall.S_IWGRP == 0 { // IF we're not allowed to write
-                log.Println("Writing not allowed")
-                allowed = false
-            }
-            log.Println("Writing allowed")
-        } else { // OTHERWISE we're other
-            log.Println("User is other")
-            if mode&syscall.S_IWOTH == 0 { // IF we're not allowed to write
-                log.Println("Writing not allowed")
-                allowed = false
-            }
-            log.Println("Writing allowed")
-        }
-    }
-
-    log.Printf("Access: %v\n", allowed)
-    return allowed
 }
 
 // Get EXTENDED attribute
@@ -521,7 +467,7 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 	// Prioritise custom metadata
 
     // Check if custom metadata exists
-    err, metadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
+    err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
     if err != nil {
         // If there is no metadata, just perform a normal ACCESS on the underlying node
         log.Println("No custom metadata available, defaulting to underlying node")
@@ -538,27 +484,27 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
     currentGID := uint32(caller.Gid)
 
     // Determine access writes based on the Mode
-    mode := metadata.Mode
+    mode := fileMetadata.Mode
     var allowed bool
 
     switch {
-    case currentUID == metadata.Uid:
+    case currentUID == fileMetadata.Uid:
         // user is the owner
         log.Println("User is the owner")
         // Don't shift the mode at all, as the bits are in the correct place already
-        allowed = checkPermission(mask, mode)
+        allowed = permissions.CheckPermissionBits(mask, mode)
         log.Printf("Owner requested %v, allowed: %v\n", mask, allowed)
-    case currentGID == metadata.Gid:
+    case currentGID == fileMetadata.Gid:
         // User is in the group
         log.Println("User is in the group")
         // shift mode 3 bits to the left to line up group permission bits to be under where user bits usually are
-        allowed = checkPermission(mask, mode<<3)
+        allowed = permissions.CheckPermissionBits(mask, mode<<3)
         log.Printf("Group member requested %v, allowed: %v\n", mask, allowed)
     default:
         // Check for others permissions
         log.Println("User is under others")
         // shift mode 6 bits to the left to line up other permission bits to be under where user bits usually are
-        allowed = checkPermission(mask, mode<<6)
+        allowed = permissions.CheckPermissionBits(mask, mode<<6)
         log.Printf("Other member requested %v, allowed: %v\n", mask, allowed)
     }
 
@@ -571,25 +517,6 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
     return fs.OK
 }
 
-// Checks if the requested access is allowed based on the leftmost bits (user)
-func checkPermission(mask, mode uint32) bool {
-	// Read permission check
-	// If the mask AND'd with 4 (requesting read access), AND the mode AND'd with S_IRUSR == 0 (file doesn't allow read access)
-	if mask&4 > 0 && mode&syscall.S_IRUSR == 0 {
-        return false
-	}
-    // Write permission check
-    // If the mask AND'd with 2 (requesting write access), AND the mode AND'd with S_IWUSR == 0 (file doesn't allow write access)
-    if mask&2 > 0 && mode&syscall.S_IWUSR == 0 {
-        return false
-    }
-    // Execute permission check
-    // If the mask AND'd with 1 (requesting exec access), AND the mode AND'd with S_IXUSR == 0 (file doesn't allow exec access)
-    if mask&1 > 0 && mode&syscall.S_IXUSR == 0 {
-        return false
-    }
-    return true
-}
 
 
 // Make a directory
@@ -616,9 +543,16 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 	// or directory in our VFS
 	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &directoryStatus)
 
+    // Enter into our DirMetadata struct
+    attr := n.RootNode.idFromStat(&directoryStatus)
+
+    // Update the directory metadata
+    metadata.CreateDirEntry(attr.Ino)
+    metadata.UpdateDirEntry(attr.Ino, &directoryStatus)
+
 	// Create the inode structure within FUSE, copying the underlying
 	// file's attributes with an auto generated inode in idFromStat
-	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&directoryStatus))
+	x := n.NewInode(ctx, nd, attr)
 
 	return x, fs.OK
 }
@@ -688,7 +622,7 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 	// Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
 	// for custom metadata to cleanup
-	herr, contentHash, refNum := hashing.RetrieveNodeInfo(filePath)
+	herr, contentHash, refNum := metadata.RetrieveNodeInfo(filePath)
 	if herr == nil {
 		// Mark if it exists
 		customExists = true
@@ -701,8 +635,8 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 	// Cleanup the custom metadata side of things ONLY if the unlink operations suceeded
 	if customExists {
-		hashing.RemoveMetadata(contentHash, refNum)
-		hashing.RemoveNodeInfo(filePath)
+		metadata.RemoveRegularFileMetadata(contentHash, refNum)
+		metadata.RemoveNodeInfo(filePath)
 	}
 
 	return fs.ToErrno(err)
@@ -712,6 +646,10 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	//log.Printf("RMDIR performed on %v from node %v\n", name, n.path())
 	filePath := filepath.Join(n.path(), name)
+
+    // See if we can remove the dir from our custom dir map first
+    metadata.RemoveDirEntry(n.GetAttr().Ino)
+
 	err := syscall.Rmdir(filePath)
 	return fs.ToErrno(err)
 }
@@ -721,7 +659,7 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 	if f != nil {
 		written, errno := f.(fs.FileWriter).Write(ctx, data, off)
 		// Update the node's metadata info with the file's current hash and refnum
-		n.updateMetadataInfo(f.(*file.OptiFSFile).CurrentHash, f.(*file.OptiFSFile).RefNum)
+		n.updateNodeContentHashAndRefNum(f.(*file.OptiFSFile).CurrentHash, f.(*file.OptiFSFile).RefNum)
 		return written, errno
 	}
 
