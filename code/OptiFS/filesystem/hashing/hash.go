@@ -73,6 +73,12 @@ func RetrieveNodeInfo(path string) (error, [64]byte, uint64) {
     return nil, info.ContentHash, info.RefNum
 }
 
+// Function handles the removal of a node's persistent info
+func RemoveNodeInfo(path string) error {
+    delete(NodePersistenceHash, path)
+    return nil
+}
+
 func HashContents(data []byte, flags uint32) [64]byte {
 
 	// Check to see if we're appending

@@ -120,6 +120,16 @@ func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
 	}
 }
 
+// Updates the node's metadata info, such as the contentHash, reference number, and
+// the persistent info in the NodePersistenceHash
+func (n *OptiFSNode) updateMetadataInfo(contentHash [64]byte, refNum uint64) {
+    n.currentHash = contentHash
+    n.refNum = refNum
+    path := n.path()
+    hashing.StoreNodeInfo(path, n.currentHash, n.refNum)
+    log.Printf("Node (%v) stored currentHash (%+v) and refNum (%+v)\n", path, n.currentHash, n.refNum)
+}
+
 // get the attributes for the file hashing
 func (n *OptiFSNode) GetAttr() fs.StableAttr {
 	return n.StableAttr()
@@ -497,12 +507,32 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	log.Printf("UNLINK performed on %v from node %v\n", name, n.path())
 
-    // Remove node entry from the main hashmap
-    hashing.RemoveMetadata(n.currentHash, n.refNum)
+    // Flag for custom metadata existing
+    var customExists bool
 
+    // Construct the file's path since 'n' is actually the parent directory
 	filePath := filepath.Join(n.path(), name)
+
+    // Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
+    // for custom metadata to cleanup
+    herr, contentHash, refNum := hashing.RetrieveNodeInfo(filePath)
+    if herr == nil {
+        // Mark if it exists
+        customExists = true
+    }
+
 	err := syscall.Unlink(filePath)
-	return fs.ToErrno(err)
+    if err != nil {
+        return fs.ToErrno(err)
+    }
+
+    // Cleanup the custom metadata side of things ONLY if the unlink operations suceeded
+    if customExists {
+        hashing.RemoveMetadata(contentHash, refNum)
+        hashing.RemoveNodeInfo(filePath)
+    }
+
+    return fs.ToErrno(err)
 }
 
 // Unlinks (removes) a directory
@@ -517,9 +547,8 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 	//log.Println("ENTERED WRITE")
 	if f != nil {
         written, errno := f.(fs.FileWriter).Write(ctx, data, off)
-        n.currentHash = f.(*file.OptiFSFile).CurrentHash
-        n.refNum = f.(*file.OptiFSFile).RefNum
-        log.Printf("Node retrieved currentHash (%+v) and refNum (%+v)\n", n.currentHash, n.refNum)
+        // Update the node's metadata info with the file's current hash and refnum
+        n.updateMetadataInfo(f.(*file.OptiFSFile).CurrentHash, f.(*file.OptiFSFile).RefNum)
 		return written, errno
 	}
 

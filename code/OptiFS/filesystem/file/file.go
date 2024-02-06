@@ -284,7 +284,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 
     // Perform the write
 
-    // TODO: Set up links if non-unique NEEDS TO BE ATOMIC
+    // TODO: Set up links if non-unique NEEDS TO BE ATOMIC ( gon' be hard :( )
     numOfBytesWritten, werr := syscall.Pwrite(f.fdesc, data, off)
 
     // Fill in the MapEntryMetadata object 
