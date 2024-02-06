@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -35,8 +36,8 @@ type OptiFSNode struct {
 	// The root node of the filesystem
 	RootNode *OptiFSRoot
 
-    currentHash [64]byte
-    refNum uint64
+	currentHash [64]byte
+	refNum      uint64
 }
 
 // Interfaces/contracts to abide by
@@ -73,7 +74,7 @@ var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil))    // For reading symlinks
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
 func (n *OptiFSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-    log.Println("IN STATFS")
+	log.Println("IN STATFS")
 	// As this is a loopback filesystem, we will stat the underlying filesystem.
 	var s syscall.Statfs_t = syscall.Statfs_t{}
 	err := syscall.Statfs(n.path(), &s)
@@ -123,11 +124,11 @@ func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
 // Updates the node's metadata info, such as the contentHash, reference number, and
 // the persistent info in the NodePersistenceHash
 func (n *OptiFSNode) updateMetadataInfo(contentHash [64]byte, refNum uint64) {
-    n.currentHash = contentHash
-    n.refNum = refNum
-    path := n.path()
-    hashing.StoreNodeInfo(path, n.currentHash, n.refNum)
-    log.Printf("Node (%v) stored currentHash (%+v) and refNum (%+v)\n", path, n.currentHash, n.refNum)
+	n.currentHash = contentHash
+	n.refNum = refNum
+	path := n.path()
+	hashing.StoreNodeInfo(path, n.currentHash, n.refNum)
+	log.Printf("Node (%v) stored currentHash (%+v) and refNum (%+v)\n", path, n.currentHash, n.refNum)
 }
 
 // get the attributes for the file hashing
@@ -181,22 +182,22 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	log.Println("NODE || entered GETATTR")
 	// if we have a file handle, use it to get the attributes
 	if f != nil {
-        log.Println("Filehandle isn't nil!")
+		log.Println("Filehandle isn't nil!")
 		return f.(fs.FileGetattrer).Getattr(ctx, out)
 	}
 
-    log.Println("Filehandle is nil, using node!")
+	log.Println("Filehandle is nil, using node!")
 
-    // Try and get an entry in our own custom system
-    herr, metadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
-    if herr == nil {
-        hashing.FillAttrOut(metadata, out)
-        return fs.OK
-    }
+	// Try and get an entry in our own custom system
+	herr, metadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
+	if herr == nil {
+		hashing.FillAttrOut(metadata, out)
+		return fs.OK
+	}
 
-    log.Println("Statting underlying node")
+	log.Println("Statting underlying node")
 
-    // OTHERWISE, just stat the node
+	// OTHERWISE, just stat the node
 	path := n.path()
 	var err error
 	s := syscall.Stat_t{}
@@ -219,38 +220,38 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 // Sets attributes of a node
 func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 
-    log.Println("NODE || entered SETATTR")
+	log.Println("NODE || entered SETATTR")
 
 	// If we have a file descriptor, use its setattr
 	if f != nil {
 		return f.(fs.FileSetattrer).Setattr(ctx, in, out)
 	}
 
-    // OTHERWISE, first try and update our own custom metadata system
-    var foundEntry bool
+	// OTHERWISE, first try and update our own custom metadata system
+	var foundEntry bool
 
-    // Check to see if we can find an entry in our hashmap
-    herr, customMetadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
-    if herr == nil {
-        foundEntry = true
-    }
+	// Check to see if we can find an entry in our hashmap
+	herr, customMetadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
+	if herr == nil {
+		foundEntry = true
+	}
 
 	// If we need to - Manually change the underlying attributes ourselves
 	path := n.path()
 
 	// If the mode needs to be changed
 	if mode, ok := in.GetMode(); ok {
-        // Try and modify our custom metadata system first
-        if foundEntry {
-            hashing.UpdateMode(customMetadata, &mode)
-        // Otherwise just update the underlying node's mode
-        } else {
-            // Change the mode to the new mode
-            if err := syscall.Chmod(path, mode); err != nil {
-                return fs.ToErrno(err)
-            }
-            log.Println("Updated underlying mode")
-        }
+		// Try and modify our custom metadata system first
+		if foundEntry {
+			hashing.UpdateMode(customMetadata, &mode)
+			// Otherwise just update the underlying node's mode
+		} else {
+			// Change the mode to the new mode
+			if err := syscall.Chmod(path, mode); err != nil {
+				return fs.ToErrno(err)
+			}
+			log.Println("Updated underlying mode")
+		}
 	}
 
 	// Try and get UID and GID
@@ -267,30 +268,30 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		if gok {
 			safeGID = int(gid)
 		}
-        // Try and update our custom metadata system isntead
-        if foundEntry {
-            // As our update function works on optional pointers, convert
-            // the safeguarding to work with pointers
-            var saferUID *uint32
-            var saferGID *uint32
-            if safeUID != -1 {
-                tmp := uint32(safeUID)
-                saferUID = &tmp
-            }
-            if safeGID != -1 {
-                tmp := uint32(safeGID)
-                saferGID = &tmp
-            }
-            hashing.UpdateOwner(customMetadata, saferUID, saferGID)
-        // Otherwise, just update the underlying node instead
-        } else {
-            // Chown these values
-            err := syscall.Chown(path, safeUID, safeGID)
-            if err != nil {
-                return fs.ToErrno(err)
-            }
-            log.Println("Updated underlying UID & GID")
-        }
+		// Try and update our custom metadata system isntead
+		if foundEntry {
+			// As our update function works on optional pointers, convert
+			// the safeguarding to work with pointers
+			var saferUID *uint32
+			var saferGID *uint32
+			if safeUID != -1 {
+				tmp := uint32(safeUID)
+				saferUID = &tmp
+			}
+			if safeGID != -1 {
+				tmp := uint32(safeGID)
+				saferGID = &tmp
+			}
+			hashing.UpdateOwner(customMetadata, saferUID, saferGID)
+			// Otherwise, just update the underlying node instead
+		} else {
+			// Chown these values
+			err := syscall.Chown(path, safeUID, safeGID)
+			if err != nil {
+				return fs.ToErrno(err)
+			}
+			log.Println("Updated underlying UID & GID")
+		}
 	}
 
 	// Same thing for modification and access times
@@ -315,45 +316,45 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		times[0] = fuse.UtimeToTimespec(ap)
 		times[1] = fuse.UtimeToTimespec(mp)
 
-        // Try and update our own custom metadata system first
-        if foundEntry {
-            hashing.UpdateTime(customMetadata, &times[0], &times[1], nil)
-        // OTHERWISE update the underlying file
-        } else {
-            // Call the utimenano syscall, ensuring to convert our time array
-            // into a slice, as it expects one
-            if err := syscall.UtimesNano(path, times[:]); err != nil {
-                return fs.ToErrno(err)
-            }
-            log.Println("Updated underlying ATime & MTime")
-        }
+		// Try and update our own custom metadata system first
+		if foundEntry {
+			hashing.UpdateTime(customMetadata, &times[0], &times[1], nil)
+			// OTHERWISE update the underlying file
+		} else {
+			// Call the utimenano syscall, ensuring to convert our time array
+			// into a slice, as it expects one
+			if err := syscall.UtimesNano(path, times[:]); err != nil {
+				return fs.ToErrno(err)
+			}
+			log.Println("Updated underlying ATime & MTime")
+		}
 	}
 
 	// If we have a size to update, do so as well
 	if size, ok := in.GetSize(); ok {
-        // First try and change the custom metadata system
-        if foundEntry {
-            tmp := int64(size)
-            hashing.UpdateSize(customMetadata, &tmp)
-        } else {
-            if err := syscall.Truncate(path, int64(size)); err != nil {
-                return fs.ToErrno(err)
-            }
-            log.Println("Updated underlying size")
-        }
+		// First try and change the custom metadata system
+		if foundEntry {
+			tmp := int64(size)
+			hashing.UpdateSize(customMetadata, &tmp)
+		} else {
+			if err := syscall.Truncate(path, int64(size)); err != nil {
+				return fs.ToErrno(err)
+			}
+			log.Println("Updated underlying size")
+		}
 	}
 
 	// Now reflect these changes in the out stream
-    // Use our custom datastruct if we can
-    if foundEntry {
-        log.Println("Reflecting custom attributes changes!")
-        // Fill the AttrOut with our custom attributes stored in our hash
-        hashing.FillAttrOut(customMetadata, out)
+	// Use our custom datastruct if we can
+	if foundEntry {
+		log.Println("Reflecting custom attributes changes!")
+		// Fill the AttrOut with our custom attributes stored in our hash
+		hashing.FillAttrOut(customMetadata, out)
 
-        return fs.OK
-    }
+		return fs.OK
+	}
 
-    log.Println("Reflecting underlying attributes changes!")
+	log.Println("Reflecting underlying attributes changes!")
 	stat := syscall.Stat_t{}
 	err := syscall.Lstat(path, &stat) // respect symlinks with lstat
 	if err != nil {
@@ -370,6 +371,22 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	// Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
 	//log.Println("ENTERED OPEN")
 	path := n.path()
+
+    // Not sure if ACCESS is checked for opening a file
+    log.Printf("\n=======================\nOpen Flags: (0x%v)\n=======================\n", strconv.FormatInt(int64(flags), 16))
+
+    // Check custom permissions for opening the file
+    // Lookup metadata entry
+    herr, metadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
+    if herr == nil { // If we found custom metadata
+        log.Println("Checking custom metadata for OPEN permission")
+        allowed := checkOpenPermissions(ctx, metadata, flags)
+        if !allowed {
+            log.Println("Not allowed!")
+            return nil, 0, syscall.EACCES
+        }
+    }
+
 	fileDescriptor, err := syscall.Open(path, int(flags), 0666) // try to open the file at path
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
@@ -379,7 +396,92 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	optiFile := file.NewOptiFSFile(fileDescriptor, n.GetAttr(), flags, n.currentHash, n.refNum)
 	//log.Println("Created a new loopback file")
 	return optiFile, flags, fs.OK
+}
 
+// Checks open flags against node permissions
+func checkOpenPermissions(ctx context.Context, metadata *hashing.MapEntryMetadata, flags uint32) bool {
+
+    // Extract the UID and GID from the context
+    caller, check := fuse.FromContext(ctx)
+    if !check {
+        log.Println("No caller info available")
+        return true
+    }
+    currentUID := uint32(caller.Uid)
+    currentGID := uint32(caller.Gid)
+
+    // Determine access writes based on the Mode
+    mode := metadata.Mode
+    allowed := true
+
+    // Check to see if we're reading and/or writing
+    readFlags := syscall.O_RDONLY | syscall.O_RDWR | syscall.O_SYNC
+    writeFlags := syscall.O_WRONLY | syscall.O_RDWR | syscall.O_APPEND | syscall.O_DSYNC | syscall.O_FSYNC | syscall.O_DIRECT
+
+    reading := flags&uint32(readFlags)
+    writing := flags&uint32(writeFlags)
+
+    isOwner := currentUID == metadata.Uid
+    isGroup := currentGID == metadata.Gid
+
+    // Check read permissions if necessary
+    if reading != 0 {
+        log.Println("Open requires reading permission")
+        // Check the read permissions
+        if isOwner { // IF we're the owner
+            log.Println("User is the owner")
+            if mode&syscall.S_IRUSR == 0 { // IF we're not allowed to read
+                log.Println("Reading is not allowed")
+                allowed = false
+            }
+            log.Println("Reading is allowed")
+        } else if isGroup { // IF we're in the group
+            log.Println("User is in the group")
+            if mode&syscall.S_IRGRP == 0 { // IF we're not allowed to read
+                log.Println("Reading is not allowed")
+                allowed = false
+            }
+            log.Println("Reading is allowed")
+        } else { // OTHERWISE we're other
+            log.Println("User is other")
+            if mode&syscall.S_IROTH == 0 { // IF we're not allowed to read
+                log.Println("Reading is not allowed")
+                allowed = false
+            }
+            log.Println("Reading is allowed")
+        }
+    }
+
+    // Check writing permissions if necessary
+    if writing != 0 {
+        log.Println("Open requires writing permission")
+        // Check the write permissions
+        if isOwner { // IF we're the owner
+            log.Println("User is the owner")
+            if mode&syscall.S_IWUSR == 0 { // IF we're not allowed to write
+                log.Println("Writing not allowed")
+                allowed = false
+            }
+            log.Println("Writing allowed")
+        } else if isGroup { // IF we're in the group
+            log.Println("User is in the group")
+            if mode&syscall.S_IWGRP == 0 { // IF we're not allowed to write
+                log.Println("Writing not allowed")
+                allowed = false
+            }
+            log.Println("Writing allowed")
+        } else { // OTHERWISE we're other
+            log.Println("User is other")
+            if mode&syscall.S_IWOTH == 0 { // IF we're not allowed to write
+                log.Println("Writing not allowed")
+                allowed = false
+            }
+            log.Println("Writing allowed")
+        }
+    }
+
+    log.Printf("Access: %v\n", allowed)
+    return allowed
 }
 
 // Get EXTENDED attribute
@@ -415,9 +517,80 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 
 // Checks access of a node
 func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
-	//log.Println("ENTERED ACCESS")
-	return fs.ToErrno(syscall.Access(n.path(), mask))
+    log.Printf("Checking ACCESS for %v\n", n.path())
+	// Prioritise custom metadata
+
+    // Check if custom metadata exists
+    err, metadata := hashing.LookupMetadataEntry(n.currentHash, n.refNum)
+    if err != nil {
+        // If there is no metadata, just perform a normal ACCESS on the underlying node
+        log.Println("No custom metadata available, defaulting to underlying node")
+        return fs.ToErrno(syscall.Access(n.path(), mask))
+    }
+
+    // Extract the UID and GID from the context
+    caller, check := fuse.FromContext(ctx)
+    if !check {
+        log.Println("No caller info available, defaulting to underlying node")
+        return fs.ToErrno(syscall.Access(n.path(), mask))
+    }
+    currentUID := uint32(caller.Uid)
+    currentGID := uint32(caller.Gid)
+
+    // Determine access writes based on the Mode
+    mode := metadata.Mode
+    var allowed bool
+
+    switch {
+    case currentUID == metadata.Uid:
+        // user is the owner
+        log.Println("User is the owner")
+        // Don't shift the mode at all, as the bits are in the correct place already
+        allowed = checkPermission(mask, mode)
+        log.Printf("Owner requested %v, allowed: %v\n", mask, allowed)
+    case currentGID == metadata.Gid:
+        // User is in the group
+        log.Println("User is in the group")
+        // shift mode 3 bits to the left to line up group permission bits to be under where user bits usually are
+        allowed = checkPermission(mask, mode<<3)
+        log.Printf("Group member requested %v, allowed: %v\n", mask, allowed)
+    default:
+        // Check for others permissions
+        log.Println("User is under others")
+        // shift mode 6 bits to the left to line up other permission bits to be under where user bits usually are
+        allowed = checkPermission(mask, mode<<6)
+        log.Printf("Other member requested %v, allowed: %v\n", mask, allowed)
+    }
+
+    if !allowed {
+        log.Println("NOT ALLOWED")
+        return syscall.EACCES
+    }
+
+    log.Println("ALLOWED")
+    return fs.OK
 }
+
+// Checks if the requested access is allowed based on the leftmost bits (user)
+func checkPermission(mask, mode uint32) bool {
+	// Read permission check
+	// If the mask AND'd with 4 (requesting read access), AND the mode AND'd with S_IRUSR == 0 (file doesn't allow read access)
+	if mask&4 > 0 && mode&syscall.S_IRUSR == 0 {
+        return false
+	}
+    // Write permission check
+    // If the mask AND'd with 2 (requesting write access), AND the mode AND'd with S_IWUSR == 0 (file doesn't allow write access)
+    if mask&2 > 0 && mode&syscall.S_IWUSR == 0 {
+        return false
+    }
+    // Execute permission check
+    // If the mask AND'd with 1 (requesting exec access), AND the mode AND'd with S_IXUSR == 0 (file doesn't allow exec access)
+    if mask&1 > 0 && mode&syscall.S_IXUSR == 0 {
+        return false
+    }
+    return true
+}
+
 
 // Make a directory
 func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
@@ -507,32 +680,32 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	log.Printf("UNLINK performed on %v from node %v\n", name, n.path())
 
-    // Flag for custom metadata existing
-    var customExists bool
+	// Flag for custom metadata existing
+	var customExists bool
 
-    // Construct the file's path since 'n' is actually the parent directory
+	// Construct the file's path since 'n' is actually the parent directory
 	filePath := filepath.Join(n.path(), name)
 
-    // Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
-    // for custom metadata to cleanup
-    herr, contentHash, refNum := hashing.RetrieveNodeInfo(filePath)
-    if herr == nil {
-        // Mark if it exists
-        customExists = true
-    }
+	// Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
+	// for custom metadata to cleanup
+	herr, contentHash, refNum := hashing.RetrieveNodeInfo(filePath)
+	if herr == nil {
+		// Mark if it exists
+		customExists = true
+	}
 
 	err := syscall.Unlink(filePath)
-    if err != nil {
-        return fs.ToErrno(err)
-    }
+	if err != nil {
+		return fs.ToErrno(err)
+	}
 
-    // Cleanup the custom metadata side of things ONLY if the unlink operations suceeded
-    if customExists {
-        hashing.RemoveMetadata(contentHash, refNum)
-        hashing.RemoveNodeInfo(filePath)
-    }
+	// Cleanup the custom metadata side of things ONLY if the unlink operations suceeded
+	if customExists {
+		hashing.RemoveMetadata(contentHash, refNum)
+		hashing.RemoveNodeInfo(filePath)
+	}
 
-    return fs.ToErrno(err)
+	return fs.ToErrno(err)
 }
 
 // Unlinks (removes) a directory
@@ -546,12 +719,11 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
 	//log.Println("ENTERED WRITE")
 	if f != nil {
-        written, errno := f.(fs.FileWriter).Write(ctx, data, off)
-        // Update the node's metadata info with the file's current hash and refnum
-        n.updateMetadataInfo(f.(*file.OptiFSFile).CurrentHash, f.(*file.OptiFSFile).RefNum)
+		written, errno := f.(fs.FileWriter).Write(ctx, data, off)
+		// Update the node's metadata info with the file's current hash and refnum
+		n.updateMetadataInfo(f.(*file.OptiFSFile).CurrentHash, f.(*file.OptiFSFile).RefNum)
 		return written, errno
 	}
-
 
 	//log.Println("WRITE - EBADFD")
 	return 0, syscall.EBADFD // bad file descriptor
@@ -772,17 +944,17 @@ func (n *OptiFSNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 	linkPath := n.path()
 
 	// Keep trying to read the link, doubling our buffler size each time
-    // 256 is just an arbitrary number that isn't necessarily too large,
-    // or too small. 
+	// 256 is just an arbitrary number that isn't necessarily too large,
+	// or too small.
 	for l := 256; ; l *= 2 {
-        // Create a buffer to read the link into
+		// Create a buffer to read the link into
 		buffer := make([]byte, l)
 		sz, err := syscall.Readlink(linkPath, buffer)
 		if err != nil {
 			return nil, fs.ToErrno(err)
 		}
 
-        // If we fit the data into the buffer, return it
+		// If we fit the data into the buffer, return it
 		if sz < len(buffer) {
 			return buffer[:sz], fs.OK
 		}

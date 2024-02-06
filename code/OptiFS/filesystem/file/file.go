@@ -66,6 +66,22 @@ func NewOptiFSFile(fdesc int, attr fs.StableAttr, flags uint32, currentHash [64]
 
 // handles read operations (implements concurrency)
 func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.ReadResult, syscall.Errno) {
+
+    log.Println("Reading file")
+
+    log.Println("Checking for custom permissions")
+    // Check permissions of custom metadata (if available)
+    herr, metadata := hashing.LookupMetadataEntry(f.CurrentHash, f.RefNum)
+    if herr == nil {
+        log.Println("Custom permissions found!")
+        allowed := checkReadPermissions(ctx, metadata)
+        if !allowed {
+            log.Println("User isn't allowed to read file handle!")
+            return nil, syscall.EACCES
+        }
+        log.Println("User is allowed to read file handle")
+    }
+
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited
 	f.mu.Lock()
@@ -77,6 +93,33 @@ func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.
 
 	return read, fs.OK
 }
+
+// Function checks if the user has read permissions
+func checkReadPermissions(ctx context.Context, metadata *hashing.MapEntryMetadata) bool {
+    // Extract the UID and GID from the caller
+    caller, check := fuse.FromContext(ctx)
+    if !check {
+        return false
+    }
+    currentUID := caller.Uid
+    currentGID := caller.Gid
+
+    // Check read permissions
+    mode := metadata.Mode
+    switch {
+    case currentUID == metadata.Uid:
+        log.Println("User is the owner")
+        return mode&syscall.S_IRUSR != 0
+    case currentGID == metadata.Gid:
+        log.Println("User is in the group")
+        return mode&syscall.S_IRGRP != 0
+    default:
+        log.Println("User is considered other")
+        return mode&syscall.S_IROTH != 0
+    }
+}
+
+
 
 func (f *OptiFSFile) Fsync(ctx context.Context, flags uint32) syscall.Errno {
 	// Gain access to the mutex lock
@@ -258,8 +301,15 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 }
 
 func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
+
+    // Check write permissions first
+
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+    // Keep the old metadata if it exists
+    herr, oldMetadata := hashing.LookupMetadataEntry(f.CurrentHash, f.RefNum)
     
     // Hash the current contents
     f.CurrentHash = hashing.HashContents(data, f.flags)
@@ -288,14 +338,17 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
     numOfBytesWritten, werr := syscall.Pwrite(f.fdesc, data, off)
 
     // Fill in the MapEntryMetadata object 
-    // TODO: Prioritise previous MapEntryMetadata data before statting underlying file
     var st syscall.Stat_t
     serr := syscall.Fstat(f.fdesc, &st)
     if serr != nil {
         return 0, fs.ToErrno(serr)
     }
+    if herr == nil { // If we had old metadata, keep aspects of it
+        hashing.MigrateMetadata(oldMetadata, metadata, &st)
+    } else { // If we don't have old metadata, do a full copy of the underlying node's metadata
+        hashing.STRUCT_FullMetadataEntryUpdate(metadata, &st)
+    }
 
-    hashing.STRUCT_FullMetadataEntryUpdate(metadata, &st)
     log.Printf("Metadata after being updated: %+v\n", metadata)
 
 
