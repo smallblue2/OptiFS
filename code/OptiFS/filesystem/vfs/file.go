@@ -1,6 +1,6 @@
 // A FileHandle represents an open file or directory, acting as
 // an abstraction for an open file descriptor.
-package file
+package vfs
 
 import (
 	"context"
@@ -11,7 +11,6 @@ import (
 	"log"
 	"sync"
 	"syscall"
-	"unsafe"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -26,10 +25,10 @@ type OptiFSFile struct {
 	fdesc int
 
 	// store the hash of the file content
-	CurrentHash [64]byte
+	currentHash [64]byte
 
     // Reference number in our memory
-    RefNum uint64
+    refNum uint64
 
 	// Stable attributes of the file
 	attr fs.StableAttr
@@ -63,7 +62,7 @@ var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil))  // gets a lock on a file, waits f
 // can be tracked
 func NewOptiFSFile(fdesc int, attr fs.StableAttr, flags uint32, currentHash [64]byte, refNum uint64) fs.FileHandle {
 	//log.Println("NEW OPTIFSFILE CREATED")
-    return &OptiFSFile{fdesc: fdesc, attr: attr, flags: flags, CurrentHash: currentHash, RefNum: refNum}
+    return &OptiFSFile{fdesc: fdesc, attr: attr, flags: flags, currentHash: currentHash, refNum: refNum}
 }
 
 // handles read operations (implements concurrency)
@@ -73,7 +72,7 @@ func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.
 
     log.Println("Checking for custom permissions")
     // Check permissions of custom metadata (if available)
-    herr, metadata := metadata.LookupRegularFileMetadata(f.CurrentHash, f.RefNum)
+    herr, metadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
     if herr == nil {
         log.Println("Custom permissions found!")
         allowed := permissions.CheckReadPermissions(ctx, metadata)
@@ -129,7 +128,7 @@ func (f *OptiFSFile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Err
     log.Println("FILE || entered GETATTR")
 
     // If we can, fill attributes from our filehash
-    err1, fileMetadata := metadata.LookupRegularFileMetadata(f.CurrentHash, f.RefNum)
+    err1, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
     if err1 == nil {
         metadata.FillAttrOut(fileMetadata, out)
         return fs.OK
@@ -160,140 +159,16 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
 
     log.Println("FILE || entered SETATTR")
 
-    var foundEntry bool
-    var foundDir bool
-
     // Check to see if we can find an entry in our hashmap
-    err1, fileMetadata := metadata.LookupRegularFileMetadata(f.CurrentHash, f.RefNum)
+    err1, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
     if err1 == nil {
-        foundEntry = true
-    }
-    err2, dirMetadata := metadata.LookupDirMetadata(f.attr.Ino)
-    if err2 == nil {
-        foundDir = true
+        log.Println("Setting attributes for custom regular file metadata.")
+        return fs.ToErrno(SetAttributes(fileMetadata, in, nil, f, out))
     }
 
-	// Check to see if we need to change the mode
-	if mode, ok := in.GetMode(); ok {
-		// If so, change the mode
-        
-        // Try our custom metadata system first
-        if foundEntry {
-            metadata.UpdateMode(fileMetadata, &mode)
-        } else if foundDir {
-            metadata.UpdateMode(dirMetadata, &mode)
-        // Otherwise just attempt the underlying file
-        } else {
-            log.Println("Updated underlying mode")
-            if err := syscall.Fchmod(f.fdesc, mode); err != nil {
-                return fs.ToErrno(err)
-            }
-        }
-	}
-
-	// Check to see if we need to change the UID or GID
-	uid, uok := in.GetUID()
-	gid, gok := in.GetGID()
-	// If we have a UID or GID to set
-	if uok || gok {
-		// Set their default values to -1
-		// -1 indicates that the respective value shouldn't change
-		safeUID, safeGID := -1, -1
-		if uok {
-			safeUID = int(uid)
-		}
-		if gok {
-			safeGID = int(gid)
-		}
-        // Try our custom metadata system first
-        if foundEntry || foundDir {
-            // As our update function works on optional pointers, convert
-            // the safeguarding to work with pointers
-            var saferUID *uint32
-            var saferGID *uint32
-            if safeUID != -1 {
-                tmp := uint32(safeUID)
-                saferUID = &tmp
-            }
-            if safeGID != -1 {
-                tmp := uint32(safeGID)
-                saferGID = &tmp
-            }
-            if foundEntry {
-                metadata.UpdateOwner(fileMetadata, saferUID, saferGID)
-            } else if foundDir {
-                metadata.UpdateOwner(dirMetadata, saferUID, saferGID)
-            }
-        // Otherwise do the underlying node
-        } else {
-            // Chown these values
-            err := syscall.Fchown(f.fdesc, safeUID, safeGID)
-            if err != nil {
-                return fs.ToErrno(err)
-            }
-            log.Println("Updated underlying UID & GID")
-        }
-	}
-
-	// Same thing for modification and access times
-	mtime, mok := in.GetMTime()
-	atime, aok := in.GetATime()
-
-	if mok || aok {
-		// Initialize pointers to the time values
-		ap := &atime
-		mp := &mtime
-		// Take into account if access or mod times are not both provided
-		if !aok {
-			ap = nil
-		}
-		if !mok {
-			mp = nil
-		}
-
-		// Create an array to hold timespec values for syscall
-		// This is a data structure that represents a time value
-		// with precision up to nanoseconds
-		var times [2]syscall.Timespec
-		times[0] = fuse.UtimeToTimespec(ap)
-		times[1] = fuse.UtimeToTimespec(mp)
-
-        // Check to see if we can update our custom metadata system first
-        if foundEntry {
-            metadata.UpdateTime(fileMetadata, &times[0], &times[1], nil)
-        } else if foundDir {
-            metadata.UpdateTime(dirMetadata, &times[0], &times[1], nil)
-        // OTHERWISE update the underlying file
-        } else {
-            // BELOW LINE IS FROM `fs` package, hanwen - TODO: REFERENCE PROPERLY
-            _, _, err := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(f.fdesc), 0, uintptr(unsafe.Pointer(&times)), uintptr(0), 0, 0)
-            err = syscall.Errno(err)
-            if err != 0 {
-                return fs.ToErrno(err)
-            }
-            log.Println("Updated underlying ATime & MTime")
-        }
-	}
-
-	// Check to see if we need to change the size
-	if sz, ok := in.GetSize(); ok {
-        // First try and change the custom metadata system
-        if foundEntry {
-            tmp := int64(sz)
-            metadata.UpdateSize(fileMetadata, &tmp)
-        } else if foundDir {
-            tmp := int64(sz)
-            metadata.UpdateSize(dirMetadata, &tmp)
-        } else {
-            // Change the size
-            if err := fs.ToErrno(syscall.Ftruncate(f.fdesc, int64(sz))); err != 0 {
-                return err
-            }
-            log.Println("Updated underlying size")
-        }
-	}
-
-	return fs.OK
+    // Otherwise, do underlying node
+    log.Println("Setting attributes for underlying filehandle.")
+    return fs.ToErrno(SetAttributes(nil, in, nil, f, out))
 }
 
 func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
@@ -302,22 +177,22 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
 	defer f.mu.Unlock()
 
     // Keep the old metadata if it exists
-    err1, oldMetadata := metadata.LookupRegularFileMetadata(f.CurrentHash, f.RefNum)
+    err1, oldMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
     
     // Hash the current contents
-    f.CurrentHash = hashing.HashContents(data, f.flags)
+    f.currentHash = hashing.HashContents(data, f.flags)
     // Check to see if it's unique
-    isUnique, _ := metadata.IsContentHashUnique(f.CurrentHash)
+    isUnique, _ := metadata.IsContentHashUnique(f.currentHash)
 
     // TODO: I think it should only be created in Create syscall, not write - or maybe not idk, need to think
 
     // If it's unique - CREATE a new MapEntry
     if isUnique {
-        metadata.CreateRegularFileMapEntry(f.CurrentHash)
+        metadata.CreateRegularFileMapEntry(f.currentHash)
     // If it already exists, simply retrieve it
     }
 
-    err2, entry := metadata.LookupRegularFileEntry(f.CurrentHash)
+    err2, entry := metadata.LookupRegularFileEntry(f.currentHash)
     if err2 != nil {
         return 0, fs.ToErrno(syscall.EAGAIN) // return EAGAIN if we error here, not sure what is appropriate...
     }
@@ -325,7 +200,7 @@ func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32,
     // Create a new MapEntryMetadata instance
     refNum, fileMetadata := metadata.CreateRegularFileMetadata(entry)
     // Set the file handle's refnum to the entry
-    f.RefNum = refNum
+    f.refNum = refNum
 
     // Perform the write
 

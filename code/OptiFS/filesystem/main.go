@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
-	"filesystem/node"
+    "filesystem/vfs"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
@@ -25,7 +25,7 @@ func main() {
 	}
 
 	under := flag.Arg(1)
-	data := &node.OptiFSRoot{
+	data := &vfs.OptiFSRoot{
 		Path: under,
 	}
 
@@ -36,7 +36,7 @@ func main() {
 	options.MountOptions.Options = append(options.MountOptions.Options, "fsname="+under) // set the filesystem name
 	options.NullPermissions = true                                                       // doesn't check the permissions for calls (good for setting up custom permissions [namespaces??])
 
-	root := &node.OptiFSNode{
+	root := &vfs.OptiFSNode{
 		RootNode: data,
 	}
 

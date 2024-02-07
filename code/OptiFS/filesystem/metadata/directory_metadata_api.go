@@ -21,8 +21,10 @@ func LookupDirMetadata(ino uint64) (error, *MapEntryMetadata) {
     log.Printf("Looking up metadata for dir (%v)\n", ino)
     metadata, ok := dirMetadataHash[ino]
     if !ok {
+        log.Println("Couldn't find a custom directory metadata entry")
         return errors.New("No metadata entry available!"), nil
     }
+        log.Println("Found a custom directory metadata entry")
     return nil, metadata
 }
 
