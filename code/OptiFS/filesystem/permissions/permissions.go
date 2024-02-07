@@ -2,6 +2,7 @@ package permissions
 
 import (
 	"context"
+	"errors"
 	"filesystem/metadata"
 	"log"
 	"syscall"
@@ -9,17 +10,67 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
+// Gets the caller UID and GID from the context provided
+func getUIDGID(ctx context.Context) (error, uint32, uint32) {
+    caller, check := fuse.FromContext(ctx)
+    if !check {
+        log.Println("No caller info available")
+        return errors.New("No caller info available"), 0, 0
+    }
+    return nil, uint32(caller.Uid), uint32(caller.Gid)
+}
+
+// Checks a user's access to a node
+func CheckAccess(ctx context.Context, mask uint32, nodeMetadata *metadata.MapEntryMetadata) bool {
+    // Extract the UID and GID from the context
+    err1, currentUID, currentGID := getUIDGID(ctx)
+    if err1 != nil {
+        log.Println("Can't get user context")
+        return false
+    }
+
+    // Determine access writes based on the Mode
+    mode := nodeMetadata.Mode
+    var allowed bool
+
+    switch {
+    case currentUID == nodeMetadata.Uid:
+        // user is the owner
+        log.Println("User is the owner")
+        // Don't shift the mode at all, as the bits are in the correct place already
+        allowed = CheckPermissionBits(mask, mode)
+        log.Printf("Owner requested %v, allowed: %v\n", mask, allowed)
+    case currentGID == nodeMetadata.Gid:
+        // User is in the group
+        log.Println("User is in the group")
+        // shift mode 3 bits to the left to line up group permission bits to be under where user bits usually are
+        allowed = CheckPermissionBits(mask, mode<<3)
+        log.Printf("Group member requested %v, allowed: %v\n", mask, allowed)
+    default:
+        // Check for others permissions
+        log.Println("User is under others")
+        // shift mode 6 bits to the left to line up other permission bits to be under where user bits usually are
+        allowed = CheckPermissionBits(mask, mode<<6)
+        log.Printf("Other member requested %v, allowed: %v\n", mask, allowed)
+    }
+
+    if !allowed {
+        log.Println("NOT ALLOWED")
+        return false
+    }
+
+    log.Println("ALLOWED")
+    return true
+}
+
 // Checks open flags against MapEntryMetadata mode, uid & gid
 func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, flags uint32) bool {
 
     // Extract the UID and GID from the context
-    caller, check := fuse.FromContext(ctx)
-    if !check {
-        log.Println("No caller info available")
-        return true
+    err1, currentUID, currentGID := getUIDGID(ctx)
+    if err1 != nil {
+        return false
     }
-    currentUID := uint32(caller.Uid)
-    currentGID := uint32(caller.Gid)
 
     // Determine access writes based on the Mode
     mode := nodeMetadata.Mode
@@ -95,15 +146,38 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
     return allowed
 }
 
-// Function checks if the user has read permissions on the MapEntryMetadata
-func CheckReadPermissions(ctx context.Context, metadata *metadata.MapEntryMetadata) bool {
-    // Extract the UID and GID from the caller
-    caller, check := fuse.FromContext(ctx)
-    if !check {
+// Function checks open dir permissions
+func CheckOpenDirPermissions(ctx context.Context, dirMetadata *metadata.MapEntryMetadata) bool {
+    err, currentUID, currentGID := getUIDGID(ctx)
+    if err != nil {
+        log.Println(err)
         return false
     }
-    currentUID := caller.Uid
-    currentGID := caller.Gid
+
+    mode := dirMetadata.Mode
+    isOwner := currentUID == dirMetadata.Uid
+    isGroup := currentGID == dirMetadata.Gid
+
+    // Check execute permissions
+    allowed := false
+    if isOwner { // If the user is the owner of the directory
+        allowed = mode&syscall.S_IXUSR != 0
+    } else if isGroup {
+        allowed = mode&syscall.S_IXGRP != 0
+    } else {
+        allowed = mode&syscall.S_IXOTH != 0
+    }
+
+    return allowed
+}
+
+// Function checks if the user has read permissions on the MapEntryMetadata
+func CheckReadPermissions(ctx context.Context, metadata *metadata.MapEntryMetadata) bool {
+    // Extract the UID and GID from the context
+    err1, currentUID, currentGID := getUIDGID(ctx)
+    if err1 != nil {
+        return false
+    }
 
     // Check read permissions
     mode := metadata.Mode

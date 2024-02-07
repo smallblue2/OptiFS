@@ -163,10 +163,26 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 
 // opens a directory and then closes it
 func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
+
+    path := n.RPath()
+    log.Printf("Opening directory '%v'\n", path)
+
+    // Check the permissions if there is custom metadata
+    err1, dirMetadata := metadata.LookupDirMetadata(path)
+    if err1 == nil {
+        log.Println("Checking directory custom permissions")
+        isAllowed := permissions.CheckOpenDirPermissions(ctx, dirMetadata)
+        if !isAllowed {
+            log.Println("Not allowed!")
+            return fs.ToErrno(syscall.EACCES)
+        }
+        log.Println("Not allowed!")
+    }
+
 	// Open the directory (n), 0755 is the default perms for a new directory
-	dir, err := syscall.Open(n.RPath(), syscall.O_DIRECTORY, 0755)
-	if err != nil {
-		return fs.ToErrno(err)
+	dir, err2 := syscall.Open(n.RPath(), syscall.O_DIRECTORY, 0755)
+	if err2 != nil {
+		return fs.ToErrno(err2)
 	}
 	syscall.Close(dir) // close when finished
 	return fs.OK
@@ -197,7 +213,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 		metadata.FillAttrOut(fileMetadata, out)
 		return fs.OK
 	}
-    err2, dirMetadata := metadata.LookupDirMetadata(n.GetAttr().Ino)
+    err2, dirMetadata := metadata.LookupDirMetadata(path)
     if err2 == nil {
         metadata.FillAttrOut(dirMetadata, out)
         return fs.OK
@@ -241,7 +257,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
         return fs.ToErrno(SetAttributes(fileMetadata, in, n, nil, out))
 	}
     // Also check to see if we can find an entry in our directory hashmap
-    err2, dirMetadata := metadata.LookupDirMetadata(n.GetAttr().Ino)
+    err2, dirMetadata := metadata.LookupDirMetadata(n.RPath())
     if err2 == nil {
         log.Println("Setting attributes for custom directory metadata.")
         return fs.ToErrno(SetAttributes(dirMetadata, in, n, nil, out))
@@ -255,8 +271,9 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 // Opens a file for reading, and returns a filehandle
 // flags determines how we open the file (read only, read-write, etc...)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, fFlags uint32, errno syscall.Errno) {
-	// Prefers an AND NOT with syscall.O_APPEND, removing it from the flags if it exists
-	//log.Println("ENTERED OPEN")
+
+	log.Println("ENTERED OPEN")
+
 	path := n.RPath()
 
     // Not sure if ACCESS is checked for opening a file
@@ -321,55 +338,29 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
     log.Printf("Checking ACCESS for %v\n", n.RPath())
 	// Prioritise custom metadata
 
-    // Check if custom metadata exists
-    err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-    if err != nil {
+    // Check if custom metadata exists for a regular file
+    if err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum); err == nil {
         // If there is no metadata, just perform a normal ACCESS on the underlying node
-        log.Println("No custom metadata available, defaulting to underlying node")
-        return fs.ToErrno(syscall.Access(n.RPath(), mask))
+        log.Println("Found custom regular file metadata, checking...")
+        isAllowed := permissions.CheckAccess(ctx, mask, fileMetadata)
+        if !isAllowed {
+            return fs.ToErrno(syscall.EACCES)
+        }
     }
 
-    // Extract the UID and GID from the context
-    caller, check := fuse.FromContext(ctx)
-    if !check {
-        log.Println("No caller info available, defaulting to underlying node")
-        return fs.ToErrno(syscall.Access(n.RPath(), mask))
-    }
-    currentUID := uint32(caller.Uid)
-    currentGID := uint32(caller.Gid)
-
-    // Determine access writes based on the Mode
-    mode := fileMetadata.Mode
-    var allowed bool
-
-    switch {
-    case currentUID == fileMetadata.Uid:
-        // user is the owner
-        log.Println("User is the owner")
-        // Don't shift the mode at all, as the bits are in the correct place already
-        allowed = permissions.CheckPermissionBits(mask, mode)
-        log.Printf("Owner requested %v, allowed: %v\n", mask, allowed)
-    case currentGID == fileMetadata.Gid:
-        // User is in the group
-        log.Println("User is in the group")
-        // shift mode 3 bits to the left to line up group permission bits to be under where user bits usually are
-        allowed = permissions.CheckPermissionBits(mask, mode<<3)
-        log.Printf("Group member requested %v, allowed: %v\n", mask, allowed)
-    default:
-        // Check for others permissions
-        log.Println("User is under others")
-        // shift mode 6 bits to the left to line up other permission bits to be under where user bits usually are
-        allowed = permissions.CheckPermissionBits(mask, mode<<6)
-        log.Printf("Other member requested %v, allowed: %v\n", mask, allowed)
+    // Check if custom metadata exists for a directory
+    path := n.RPath()
+    if err, dirMetadata := metadata.LookupDirMetadata(path); err == nil {
+        log.Println("Found custom directory metadata, checking...")
+        isAllowed := permissions.CheckAccess(ctx, mask, dirMetadata)
+        if !isAllowed {
+            return fs.ToErrno(syscall.EACCES)
+        }
     }
 
-    if !allowed {
-        log.Println("NOT ALLOWED")
-        return syscall.EACCES
-    }
 
-    log.Println("ALLOWED")
-    return fs.OK
+    // Otherwise, default the access to underlying filesystem
+    return fs.ToErrno(syscall.Access(n.RPath(), mask))
 }
 
 
@@ -402,8 +393,8 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
     attr := n.RootNode.idFromStat(&directoryStatus)
 
     // Update the directory metadata
-    metadata.CreateDirEntry(attr.Ino)
-    metadata.UpdateDirEntry(attr.Ino, &directoryStatus)
+    metadata.CreateDirEntry(filePath)
+    metadata.UpdateDirEntry(filePath, &directoryStatus)
 
 	// Create the inode structure within FUSE, copying the underlying
 	// file's attributes with an auto generated inode in idFromStat
@@ -503,7 +494,7 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	filePath := filepath.Join(n.RPath(), name)
 
     // See if we can remove the dir from our custom dir map first
-    metadata.RemoveDirEntry(n.GetAttr().Ino)
+    metadata.RemoveDirEntry(filePath)
 
 	err := syscall.Rmdir(filePath)
 	return fs.ToErrno(err)

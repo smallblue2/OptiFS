@@ -133,11 +133,6 @@ func (f *OptiFSFile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Err
         metadata.FillAttrOut(fileMetadata, out)
         return fs.OK
     }
-    err2, dirMetadata := metadata.LookupDirMetadata(f.attr.Ino)
-    if err2 == nil {
-        metadata.FillAttrOut(dirMetadata, out)
-        return fs.OK
-    }
 
     // OTHERWISE, just stat the file
 

@@ -9,17 +9,17 @@ import (
 )
 
 // Creates a default directory entry in the directoryMetadataHash
-func CreateDirEntry(ino uint64) *MapEntryMetadata {
-    log.Printf("Created a new directory metadata entry for (%v)\n", ino)
-    dirMetadataHash[ino] = &MapEntryMetadata{}
-    return dirMetadataHash[ino]
+func CreateDirEntry(path string) *MapEntryMetadata {
+    log.Printf("Created a new directory metadata entry for (%v)\n", path)
+    dirMetadataHash[path] = &MapEntryMetadata{}
+    return dirMetadataHash[path]
 }
 
 // Performs a lookup for a directory entry in the directoryMetadataHash with
 // the 'ino' being the key
-func LookupDirMetadata(ino uint64) (error, *MapEntryMetadata) {
-    log.Printf("Looking up metadata for dir (%v)\n", ino)
-    metadata, ok := dirMetadataHash[ino]
+func LookupDirMetadata(path string) (error, *MapEntryMetadata) {
+    log.Printf("Looking up metadata for dir (%v)\n", path)
+    metadata, ok := dirMetadataHash[path]
     if !ok {
         log.Println("Couldn't find a custom directory metadata entry")
         return errors.New("No metadata entry available!"), nil
@@ -30,11 +30,11 @@ func LookupDirMetadata(ino uint64) (error, *MapEntryMetadata) {
 
 // Updates an entry in the directoryMetadataHash with the full contents of the provided
 // Stat_t object. Will error if there exists no entry for the provided ino.
-func UpdateDirEntry(ino uint64, unstableAttr *syscall.Stat_t) error {
+func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t) error {
 
 	log.Println("Updating dir metadata through lookup...")
 	// Ensure that contentHash and refNum is valid
-	err, metadata := LookupDirMetadata(ino)
+	err, metadata := LookupDirMetadata(path)
 	if err != nil {
 		log.Println("Couldn't find the metadata struct")
 		return err
@@ -53,6 +53,6 @@ func UpdateDirEntry(ino uint64, unstableAttr *syscall.Stat_t) error {
 // Deletes an entry in the directoryMetadataHash with the ino provided.
 // Provides no response, function deletes if the entry is there, does nothing
 // if it is not.
-func RemoveDirEntry(ino uint64) {
-    delete(dirMetadataHash, ino)
+func RemoveDirEntry(path string) {
+    delete(dirMetadataHash, path)
 }
