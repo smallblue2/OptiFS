@@ -3,7 +3,9 @@
 package vfs
 
 import (
+	"context"
 	"filesystem/metadata"
+	"filesystem/permissions"
 	"log"
 	"syscall"
 	"unsafe"
@@ -15,9 +17,18 @@ import (
 // Sets the attributes of the provided MapEntryMetadata struct.
 //
 // Assumes either an OptiFSNode input, or an OptiFSFile input.
-func SetAttributes(customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn, n *OptiFSNode, f *OptiFSFile, out *fuse.AttrOut) syscall.Errno {
+func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn, n *OptiFSNode, f *OptiFSFile, out *fuse.AttrOut) syscall.Errno {
 	// If we need to - Manually change the underlying attributes ourselves
     path := n.RPath()
+
+    var isOwner bool
+    var hasWrite bool
+
+    // Check owner and write permission status
+    if customMetadata != nil {
+        isOwner = permissions.IsOwner(ctx, customMetadata)
+        hasWrite = permissions.CheckPermissions(ctx, customMetadata, 1)
+    }
 
     log.Printf("Setting attributes for '%v'\n", path)
 
@@ -25,6 +36,10 @@ func SetAttributes(customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn
 	if mode, ok := in.GetMode(); ok {
         log.Println("Setting Mode")
         if customMetadata != nil {
+            // Ensure the user has ownership of the file
+            if !isOwner {
+                return syscall.EACCES
+            }
             // Try and modify our custom metadata system first
             metadata.UpdateMode(customMetadata, &mode)
             log.Println("Set custom mode")
@@ -64,6 +79,10 @@ func SetAttributes(customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn
 		}
 		// Try and update our custom metadata system isntead
 		if customMetadata != nil {
+            // Ensure the user is the current owner
+            if !isOwner {
+                return syscall.EACCES
+            }
 			// As our update function works on optional pointers, convert
 			// the safeguarding to work with pointers
 			var saferUID *uint32
@@ -124,6 +143,11 @@ func SetAttributes(customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn
 
 		// Try and update our own custom metadata system first
 		if customMetadata != nil {
+            // Ensure we have write permissions
+            if !hasWrite {
+                log.Println("User doesn't have permission to change time!")
+                return syscall.EACCES
+            }
 			metadata.UpdateTime(customMetadata, &times[0], &times[1], nil)
             log.Println("Set custom time")
 			// OTHERWISE update the underlying file
@@ -153,6 +177,11 @@ func SetAttributes(customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn
         log.Println("Updating size")
 		// First try and change the custom metadata system
 		if customMetadata != nil {
+            // Ensure we have write permissions to be updating the size
+            if !hasWrite {
+                log.Println("User doesn't have permission to change the size!")
+                return syscall.EACCES
+            }
 			tmp := int64(size)
 			metadata.UpdateSize(customMetadata, &tmp)
             log.Println("Updated custom size")

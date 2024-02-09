@@ -72,10 +72,10 @@ func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.
 
     log.Println("Checking for custom permissions")
     // Check permissions of custom metadata (if available)
-    herr, metadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
+    herr, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
     if herr == nil {
         log.Println("Custom permissions found!")
-        allowed := permissions.CheckReadPermissions(ctx, metadata)
+        allowed := permissions.CheckPermissions(ctx, fileMetadata, 0) // Check read perm
         if !allowed {
             log.Println("User isn't allowed to read file handle!")
             return nil, syscall.EACCES
@@ -158,12 +158,12 @@ func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.
     err1, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
     if err1 == nil {
         log.Println("Setting attributes for custom regular file metadata.")
-        return fs.ToErrno(SetAttributes(fileMetadata, in, nil, f, out))
+        return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, nil, f, out))
     }
 
     // Otherwise, do underlying node
     log.Println("Setting attributes for underlying filehandle.")
-    return fs.ToErrno(SetAttributes(nil, in, nil, f, out))
+    return fs.ToErrno(SetAttributes(ctx, nil, in, nil, f, out))
 }
 
 func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
