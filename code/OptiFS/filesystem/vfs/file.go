@@ -4,7 +4,6 @@ package vfs
 
 import (
 	"context"
-	"filesystem/hashing"
 	"filesystem/metadata"
 	"filesystem/permissions"
 
@@ -49,8 +48,6 @@ var _ = (fs.FileHandle)((*OptiFSFile)(nil))
 var _ = (fs.FileReader)((*OptiFSFile)(nil))    // reading a file
 var _ = (fs.FileFsyncer)((*OptiFSFile)(nil))   // Ensuring things are written to disk
 var _ = (fs.FileFlusher)((*OptiFSFile)(nil))   // Flushes the file
-var _ = (fs.FileSetattrer)((*OptiFSFile)(nil)) // Writes attributes to the file
-var _ = (fs.FileWriter)((*OptiFSFile)(nil))    // For performing write operations
 var _ = (fs.FileGetattrer)((*OptiFSFile)(nil)) // get attrs of a file
 var _ = (fs.FileReleaser)((*OptiFSFile)(nil))  // release (close) a file
 var _ = (fs.FileGetlker)((*OptiFSFile)(nil))   // find conflicting locks for given lock
@@ -60,7 +57,7 @@ var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil))  // gets a lock on a file, waits f
 // makes a filehandle, to give more control over operations on files in the system
 // abstract reference to files, where the state of the file (open, offsets, reading etc)
 // can be tracked
-func NewOptiFSFile(fdesc int, attr fs.StableAttr, flags uint32, currentHash [64]byte, refNum uint64) fs.FileHandle {
+func NewOptiFSFile(fdesc int, attr fs.StableAttr, flags uint32, currentHash [64]byte, refNum uint64) *OptiFSFile {
 	//log.Println("NEW OPTIFSFILE CREATED")
     return &OptiFSFile{fdesc: fdesc, attr: attr, flags: flags, currentHash: currentHash, refNum: refNum}
 }
@@ -146,75 +143,6 @@ func (f *OptiFSFile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Err
 	out.FromStat(&s) // fill the attr into struct if no errors
 
 	return fs.OK
-}
-
-func (f *OptiFSFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-    log.Println("FILE || entered SETATTR")
-
-    // Check to see if we can find an entry in our hashmap
-    err1, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
-    if err1 == nil {
-        log.Println("Setting attributes for custom regular file metadata.")
-        return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, nil, f, out))
-    }
-
-    // Otherwise, do underlying node
-    log.Println("Setting attributes for underlying filehandle.")
-    return fs.ToErrno(SetAttributes(ctx, nil, in, nil, f, out))
-}
-
-func (f *OptiFSFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-    // Keep the old metadata if it exists
-    err1, oldMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
-    
-    // Hash the current contents
-    f.currentHash = hashing.HashContents(data, f.flags)
-    // Check to see if it's unique
-    isUnique, _ := metadata.IsContentHashUnique(f.currentHash)
-
-    // TODO: I think it should only be created in Create syscall, not write - or maybe not idk, need to think
-
-    // If it's unique - CREATE a new MapEntry
-    if isUnique {
-        metadata.CreateRegularFileMapEntry(f.currentHash)
-    // If it already exists, simply retrieve it
-    }
-
-    err2, entry := metadata.LookupRegularFileEntry(f.currentHash)
-    if err2 != nil {
-        return 0, fs.ToErrno(syscall.EAGAIN) // return EAGAIN if we error here, not sure what is appropriate...
-    }
-
-    // Create a new MapEntryMetadata instance
-    refNum, fileMetadata := metadata.CreateRegularFileMetadata(entry)
-    // Set the file handle's refnum to the entry
-    f.refNum = refNum
-
-    // Perform the write
-
-    // TODO: Set up links if non-unique NEEDS TO BE ATOMIC ( gon' be hard :( )
-    numOfBytesWritten, werr := syscall.Pwrite(f.fdesc, data, off)
-
-    // Fill in the MapEntryMetadata object 
-    var st syscall.Stat_t
-    serr := syscall.Fstat(f.fdesc, &st)
-    if serr != nil {
-        return 0, fs.ToErrno(serr)
-    }
-    if err1 == nil { // If we had old metadata, keep aspects of it
-        metadata.MigrateRegularFileMetadata(oldMetadata, fileMetadata, &st)
-    } else { // If we don't have old metadata, do a full copy of the underlying node's metadata
-        metadata.FullMapEntryMetadataUpdate(fileMetadata, &st)
-    }
-
-    return uint32(numOfBytesWritten), fs.ToErrno(werr)
 }
 
 // FUSE's version of a close

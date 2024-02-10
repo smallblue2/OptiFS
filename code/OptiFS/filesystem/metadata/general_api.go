@@ -6,21 +6,40 @@ import (
 	"log"
 	"syscall"
 
+	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 // Updates a MapEntryMetadata object with all data provided from the Stat_t object passed
-func FullMapEntryMetadataUpdate(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t) error {
+func FullMapEntryMetadataUpdate(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) error {
 
 	log.Println("Updating metadata through struct...")
 	log.Printf("unstableAttr: %+v\n", unstableAttr)
 
-    updateAllFromStat(metadata, unstableAttr)
+    updateAllFromStat(metadata, unstableAttr, stableAttr)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through struct")
 
 	return nil
+}
+
+func FillAttr(customMetadata *MapEntryMetadata, out *fuse.Attr) {
+	(*out).Ino = (*customMetadata).Ino
+	(*out).Size = uint64((*customMetadata).Size)
+	(*out).Blocks = uint64((*customMetadata).Blocks)
+	(*out).Atime = uint64((*customMetadata).Atim.Sec)
+	(*out).Atimensec = uint32((*customMetadata).Atim.Nsec)
+	(*out).Mtime = uint64((*customMetadata).Mtim.Sec)
+	(*out).Mtimensec = uint32((*customMetadata).Mtim.Nsec)
+	(*out).Ctime = uint64((*customMetadata).Ctim.Sec)
+	(*out).Ctimensec = uint32((*customMetadata).Ctim.Nsec)
+	(*out).Mode = (*customMetadata).Mode
+	(*out).Nlink = uint32((*customMetadata).Nlink)
+	(*out).Uid = (*customMetadata).Uid
+	(*out).Gid = (*customMetadata).Gid
+	(*out).Rdev = uint32((*customMetadata).Rdev)
+	(*out).Blksize = uint32((*customMetadata).Blksize)
 }
 
 

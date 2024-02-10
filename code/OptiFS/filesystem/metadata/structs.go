@@ -2,7 +2,11 @@
 
 package metadata
 
-import "syscall"
+import (
+	"syscall"
+
+	"github.com/hanwen/go-fuse/v2/fs"
+)
 
 // MapEntry is the entry for hashed content in our regularFileMetadataHash
 //
@@ -41,6 +45,9 @@ type MapEntryMetadata struct {
 
 // NodeInfo is used to store data required to keep our nodes persistent between OptiFS instances
 type NodeInfo struct {
-	ContentHash [64]byte
-	RefNum      uint64
+    stableAttr fs.StableAttr
+    mode uint32
+    isDir bool
+	contentHash [64]byte
+	refNum      uint64
 }

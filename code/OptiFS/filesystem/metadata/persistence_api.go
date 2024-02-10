@@ -7,21 +7,58 @@ import (
 	"errors"
 	"log"
 	"os"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 )
 
 // Stores the content hash and reference number for keeping a node persistent between OptiFS instances
-func StoreNodeInfo(path string, contentHash [64]byte, refNum uint64) {
-	nodePersistenceHash[path] = &NodeInfo{ContentHash: contentHash, RefNum: refNum}
+func StoreRegFileInfo(path string, stableAttr *fs.StableAttr, mode uint32, contentHash [64]byte, refNum uint64) {
+    nodePersistenceHash[path] = &NodeInfo{stableAttr: *stableAttr, mode: mode, isDir: false, contentHash: contentHash, refNum: refNum}
+}
+
+// Specifically stores a directory into the persistence hash
+func StoreDirInfo(path string, stableAttr *fs.StableAttr, mode uint32) {
+    nodePersistenceHash[path] = &NodeInfo{stableAttr: *stableAttr, mode: mode, isDir: true}
+}
+
+// Updates node info in the persistence hash, all values except the path are optional and won't be updated if nil
+func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *uint32, contentHash *[64]byte, refNum *uint64) {
+    log.Printf("Updating {%v}'s Persistent Data", path)
+	store, ok := nodePersistenceHash[path]
+	if !ok {
+        log.Println("DOESNT EXIST!")
+		return
+	}
+	if isDir != nil {
+        log.Println("Setting IsDir")
+		store.isDir = *isDir
+	}
+	if stableAttr != nil {
+        log.Println("Setting stableAttr")
+		store.stableAttr = *stableAttr
+	}
+    if mode != nil {
+        log.Println("Setting mode")
+        store.mode = *mode
+    }
+	if contentHash != nil {
+        log.Println("Setting contentHash")
+		store.contentHash = *contentHash
+	}
+	if refNum != nil {
+        log.Println("Setting refNum")
+		store.refNum = *refNum
+	}
 }
 
 // Retrieves the content hash and reference number of a node in the nodePersistenceHash
-func RetrieveNodeInfo(path string) (error, [64]byte, uint64) {
+func RetrieveNodeInfo(path string) (error, *fs.StableAttr, uint32, bool, [64]byte, uint64) {
 	info, ok := nodePersistenceHash[path]
 	if !ok {
-		return errors.New("No node info available for path"), [64]byte{}, 0
+		return errors.New("No node info available for path"), &fs.StableAttr{}, 0, false, [64]byte{}, 0
 	}
 
-	return nil, info.ContentHash, info.RefNum
+	return nil, &info.stableAttr, info.mode, info.isDir, info.contentHash, info.refNum
 }
 
 // Removes an entry from the nodePersistenceHash
@@ -73,7 +110,7 @@ func RetrieveMetadataMap() error {
 
 	defer file.Close() // don't let the file close
 
-	decode := gob.NewDecoder(file)             // set the file that we opened to the decoder
+	decode := gob.NewDecoder(file)                  // set the file that we opened to the decoder
 	dErr := decode.Decode(&regularFileMetadataHash) // decode the file back into the hashmap
 
 	if dErr != nil {

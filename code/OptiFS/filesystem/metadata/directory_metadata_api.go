@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log"
 	"syscall"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 )
 
 // Creates a default directory entry in the directoryMetadataHash
@@ -30,7 +32,7 @@ func LookupDirMetadata(path string) (error, *MapEntryMetadata) {
 
 // Updates an entry in the directoryMetadataHash with the full contents of the provided
 // Stat_t object. Will error if there exists no entry for the provided ino.
-func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t) error {
+func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) error {
 
 	log.Println("Updating dir metadata through lookup...")
 	// Ensure that contentHash and refNum is valid
@@ -42,7 +44,7 @@ func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t) error {
 	log.Println("Found the metadata struct")
 
 	// Now we can be sure the entry exists, let's update it
-    updateAllFromStat(metadata, unstableAttr)
+    updateAllFromStat(metadata, unstableAttr, stableAttr)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through lookup")

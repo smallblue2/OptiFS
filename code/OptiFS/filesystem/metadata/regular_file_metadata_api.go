@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log"
 	"syscall"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 )
 
 // Performs a lookup on the regularFileMetadataHash to tell if the provided content hash is unique.
@@ -142,7 +144,7 @@ func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, 
 // Updates a MapEntryMetadata instance corresponding to the content hash and reference num provided
 //
 // If refNum or contentHash is invalid, it returns an error
-func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t) error {
+func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) error {
 
 	log.Println("Updating metadata through lookup...")
 	// Ensure that contentHash and refNum is valid
@@ -156,7 +158,7 @@ func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstable
 	log.Printf("unstableAttr: %+v\n", unstableAttr)
 
 	// Now we can be sure the entry exists, let's update it
-    updateAllFromStat(metadata, unstableAttr)
+    updateAllFromStat(metadata, unstableAttr, stableAttr)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through lookup")

@@ -2,8 +2,11 @@ package vfs
 
 import (
 	"context"
+	"encoding/binary"
+	"filesystem/hashing"
 	"filesystem/metadata"
 	"filesystem/permissions"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -43,25 +46,25 @@ type OptiFSNode struct {
 // Interfaces/contracts to abide by
 
 // Filesystem and Node Operations
-var _ = (fs.NodeStatfser)((*OptiFSNode)(nil))      // StatFS
-var _ = (fs.InodeEmbedder)((*OptiFSNode)(nil))     // Inode
+var _ = (fs.NodeStatfser)((*OptiFSNode)(nil))  // StatFS
+var _ = (fs.InodeEmbedder)((*OptiFSNode)(nil)) // Inode
 
 // Directory Operations
-var _ = (fs.NodeLookuper)((*OptiFSNode)(nil))      // lookup
-var _ = (fs.NodeOpendirer)((*OptiFSNode)(nil))     // opening directories
-var _ = (fs.NodeReaddirer)((*OptiFSNode)(nil))     // read directory
-var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil))       // Creates a directory
-var _ = (fs.NodeRmdirer)((*OptiFSNode)(nil))       // Unlinks (deletes) a directory
-var _ = (fs.NodeAccesser)((*OptiFSNode)(nil))      // Checks access of a node
+var _ = (fs.NodeLookuper)((*OptiFSNode)(nil))  // lookup
+var _ = (fs.NodeOpendirer)((*OptiFSNode)(nil)) // opening directories
+var _ = (fs.NodeReaddirer)((*OptiFSNode)(nil)) // read directory
+var _ = (fs.NodeMkdirer)((*OptiFSNode)(nil))   // Creates a directory
+var _ = (fs.NodeRmdirer)((*OptiFSNode)(nil))   // Unlinks (deletes) a directory
+var _ = (fs.NodeAccesser)((*OptiFSNode)(nil))  // Checks access of a node
 
 // Regular File Operations
-var _ = (fs.NodeOpener)((*OptiFSNode)(nil))        // open a file
-var _ = (fs.NodeCreater)((*OptiFSNode)(nil))       // creates a file
-var _ = (fs.NodeUnlinker)((*OptiFSNode)(nil))      // Unlinks (deletes) a file
-var _ = (fs.NodeWriter)((*OptiFSNode)(nil))        // Writes to a node
-var _ = (fs.NodeFlusher)((*OptiFSNode)(nil))       // Flush the node
-var _ = (fs.NodeReleaser)((*OptiFSNode)(nil))      // Releases a node
-var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))       // Ensures writes are actually written to disk
+var _ = (fs.NodeOpener)((*OptiFSNode)(nil))   // open a file
+var _ = (fs.NodeCreater)((*OptiFSNode)(nil))  // creates a file
+var _ = (fs.NodeUnlinker)((*OptiFSNode)(nil)) // Unlinks (deletes) a file
+var _ = (fs.NodeWriter)((*OptiFSNode)(nil))   // Writes to a node
+var _ = (fs.NodeFlusher)((*OptiFSNode)(nil))  // Flush the node
+var _ = (fs.NodeReleaser)((*OptiFSNode)(nil)) // Releases a node
+var _ = (fs.NodeFsyncer)((*OptiFSNode)(nil))  // Ensures writes are actually written to disk
 
 // Attribute Operations
 var _ = (fs.NodeGetattrer)((*OptiFSNode)(nil))     // get attributes of a node
@@ -72,15 +75,14 @@ var _ = (fs.NodeRemovexattrer)((*OptiFSNode)(nil)) // Remove extended attributes
 var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes of a node
 
 // Locking and Linking Operations
-var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))       // find conflicting locks for given lock
-var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))       // gets a lock on a node
-var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil))      // gets a lock on a node, waits for it to be ready
-var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))       // Changes the directory a node is in
-var _ = (fs.NodeMknoder)((*OptiFSNode)(nil))       // Similar to lookup, but creates the inode
-var _ = (fs.NodeLinker)((*OptiFSNode)(nil))        // For handling hard links
-var _ = (fs.NodeSymlinker)((*OptiFSNode)(nil))     // For handling hard links
-var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil))    // For reading symlinks
-
+var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))  // find conflicting locks for given lock
+var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))  // gets a lock on a node
+var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil)) // gets a lock on a node, waits for it to be ready
+// var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))    // Changes the directory a node is in
+// var _ = (fs.NodeMknoder)((*OptiFSNode)(nil))    // Similar to lookup, but creates the inode
+// var _ = (fs.NodeLinker)((*OptiFSNode)(nil))     // For handling hard links
+// var _ = (fs.NodeSymlinker)((*OptiFSNode)(nil))  // For handling hard links
+var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil)) // For reading symlinks
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -116,30 +118,33 @@ func (n *OptiFSRoot) newNode(parent *fs.Inode, name string, s *syscall.Stat_t) f
 	}
 }
 
+// Create an existing node in the system
+func (n *OptiFSRoot) existingNode(existingHash [64]byte, existingRef uint64) fs.InodeEmbedder {
+	return &OptiFSNode{
+		RootNode:    n,
+		currentHash: existingHash,
+		refNum:      existingRef,
+	}
+}
+
 // Function creates a custom, unique, inode number from a file stat structure
 //
 // since we're using NFS, theres a chance not all Inode numbers will be unique, so we
 // calculate one using bit swapping
-func (n *OptiFSRoot) idFromStat(s *syscall.Stat_t) fs.StableAttr {
-	// swap the higher and lower bits to generate unique no
-	swapped := (uint64(s.Dev) << 32) | (uint64(s.Dev) >> 32)
-	swappedRoot := (n.Dev << 32) | (n.Dev << 32)
+func (n *OptiFSRoot) getNewStableAttr(s *syscall.Stat_t, path *string) fs.StableAttr {
+	// Otherwise, generate a new one
+	inodeInfoString := fmt.Sprintf("%s%d%d", *path, s.Dev, s.Ino)
+	inodeInfo := []byte(inodeInfoString)
+	hash := hashing.HashContents(inodeInfo, 0)
+
+	vIno := binary.BigEndian.Uint64(hash[:8])
 
 	return fs.StableAttr{
-		Mode: uint32(s.Mode),                  // Copy the underlying files perms
-		Gen:  1,                               // generation number (determines lifetime of inode)
-		Ino:  (swapped ^ swappedRoot) ^ s.Ino, // Unique generated inode number
+		Mode: s.Mode, // Copy the underlying files perms
+		Gen:  1,      // generation number (determines lifetime of inode)
+		Ino:  vIno,   // Unique generated inode number
 	}
-}
 
-// Updates the node's metadata info, such as the contentHash, reference number, and
-// the persistent info in the NodePersistenceHash
-func (n *OptiFSNode) updateNodeContentHashAndRefNum(contentHash [64]byte, refNum uint64) {
-	n.currentHash = contentHash
-	n.refNum = refNum
-	path := n.RPath()
-	metadata.StoreNodeInfo(path, n.currentHash, n.refNum)
-	log.Printf("Node (%v) stored currentHash (%+v) and refNum (%+v)\n", path, n.currentHash, n.refNum)
 }
 
 // get the attributes for the file hashing
@@ -149,61 +154,53 @@ func (n *OptiFSNode) GetAttr() fs.StableAttr {
 
 // lookup FINDS A NODE based on its name
 func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-    path := n.RPath()
+	path := n.RPath()
 
-    // Check execute permissions on the parent directory
-    err1, dirMetadata := metadata.LookupDirMetadata(path)
-    if err1 == nil {
-        log.Println("Checking directory custom permissions")
-        isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
-        if !isAllowed {
-            log.Println("Not allowed!")
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-        log.Println("Not allowed!")
-    }
+	log.Printf("LOOKUP performed for {%v} from node {%v}\n", name, path)
 
+	// Check execute permissions on the parent directory
+	err1, dirMetadata := metadata.LookupDirMetadata(path)
+	if err1 == nil {
+		log.Println("Checking directory custom permissions")
+		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
+		if !isAllowed {
+			log.Println("Not allowed!")
+			return nil, fs.ToErrno(syscall.EACCES)
+		}
+		log.Println("Not allowed!")
+	}
 
-	//log.Printf("LOOKUP performed for %v from node %v\n", name, n.path())
 	filePath := filepath.Join(n.RPath(), name) // getting the full path to the file (join name to path)
-	s := syscall.Stat_t{}                     // status of a file
-	err := syscall.Lstat(filePath, &s)        // gets the file attributes (also returns attrs of symbolic link)
+	s := syscall.Stat_t{}                      // status of a file
+	err := syscall.Lstat(filePath, &s)         // gets the file attributes (also returns attrs of symbolic link)
 
 	if err != nil {
-		////log.Println("LOOKUP FAILED!")
+		log.Println("LOOKUP FAILED!")
 		return nil, fs.ToErrno(err)
 	}
 
-	// Fill the output attributes from out stat struct
-	out.Attr.FromStat(&s)
+	oErr, oNode, _ := HandleNodeInstantiation(ctx, n, filePath, name, &s, out, nil, nil)
 
-	// Create a new node to represent the underlying looked up file
-	// or directory in our VFS
-	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &s)
-	// Create the inode structure within FUSE, copying the underlying
-	// file's attributes with an auto generated inode in idFromStat
-	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
-
-	return x, fs.OK
+	return oNode, oErr
 }
 
 // opens a directory and then closes it
 func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 
-    path := n.RPath()
-    log.Printf("Opening directory '%v'\n", path)
+	path := n.RPath()
+	log.Printf("Opening directory '%v'\n", path)
 
-    // Check exec permissions if there is custom metadata
-    err1, dirMetadata := metadata.LookupDirMetadata(path)
-    if err1 == nil {
-        log.Println("Checking directory custom permissions")
-        isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
-        if !isAllowed {
-            log.Println("Not allowed!")
-            return fs.ToErrno(syscall.EACCES)
-        }
-        log.Println("Not allowed!")
-    }
+	// Check exec permissions if there is custom metadata
+	err1, dirMetadata := metadata.LookupDirMetadata(path)
+	if err1 == nil {
+		log.Println("Checking directory custom permissions")
+		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
+		if !isAllowed {
+			log.Println("Not allowed!")
+			return fs.ToErrno(syscall.EACCES)
+		}
+		log.Println("Not allowed!")
+	}
 
 	// Open the directory (n), 0755 is the default perms for a new directory
 	dir, err2 := syscall.Open(n.RPath(), syscall.O_DIRECTORY, 0755)
@@ -217,17 +214,17 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 // opens a stream of dir entries,
 func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
-    path := n.RPath()
+	path := n.RPath()
 
-    // Check read permissions if available
-    err1, dirMetadata := metadata.LookupDirMetadata(path)
-    if err1 == nil {
-        isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 0)
-        if !isAllowed {
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-        log.Println("Not allowed!")
-    }
+	// Check read permissions if available
+	err1, dirMetadata := metadata.LookupDirMetadata(path)
+	if err1 == nil {
+		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 0)
+		if !isAllowed {
+			return nil, fs.ToErrno(syscall.EACCES)
+		}
+		log.Println("Not allowed!")
+	}
 
 	return fs.NewLoopbackDirStream(path)
 }
@@ -251,11 +248,11 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 		metadata.FillAttrOut(fileMetadata, out)
 		return fs.OK
 	}
-    err2, dirMetadata := metadata.LookupDirMetadata(path)
-    if err2 == nil {
-        metadata.FillAttrOut(dirMetadata, out)
-        return fs.OK
-    }
+	err2, dirMetadata := metadata.LookupDirMetadata(path)
+	if err2 == nil {
+		metadata.FillAttrOut(dirMetadata, out)
+		return fs.OK
+	}
 
 	log.Println("Statting underlying node")
 
@@ -283,27 +280,28 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 	log.Println("NODE || entered SETATTR")
 
-	// If we have a file descriptor, use its setattr
-	if f != nil {
-		return f.(fs.FileSetattrer).Setattr(ctx, in, out)
-	}
-
 	// Check to see if we can find an entry in our node hashmap
 	err1, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
 	if err1 == nil {
-        log.Println("Setting attributes for custom regular file metadata.")
-        return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, nil, out))
+		log.Println("Setting attributes for custom regular file metadata.")
+		if f != nil {
+			return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, f.(*OptiFSFile), out))
+		}
+		return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, nil, out))
 	}
-    // Also check to see if we can find an entry in our directory hashmap
-    err2, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-    if err2 == nil {
-        log.Println("Setting attributes for custom directory metadata.")
-        return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, nil, out))
-    }
+	// Also check to see if we can find an entry in our directory hashmap
+	err2, dirMetadata := metadata.LookupDirMetadata(n.RPath())
+	if err2 == nil {
+		log.Println("Setting attributes for custom directory metadata.")
+		if f != nil {
+			return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, f.(*OptiFSFile), out))
+		}
+		return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, nil, out))
+	}
 
-    // Otherwise, neither exists; just do underlying node
-    log.Println("Setting attributes for underlying node.")
-    return fs.ToErrno(SetAttributes(ctx, nil, in, n, nil, out))
+	// Otherwise, neither exists; just do underlying node
+	log.Println("Setting attributes for underlying node.")
+	return fs.ToErrno(SetAttributes(ctx, nil, in, n, nil, out))
 }
 
 // Opens a file for reading, and returns a filehandle
@@ -314,25 +312,25 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 
 	path := n.RPath()
 
-    // Not sure if ACCESS is checked for opening a file
-    log.Printf("\n=======================\nOpen Flags: (0x%v)\n=======================\n", strconv.FormatInt(int64(flags), 16))
+	// Not sure if ACCESS is checked for opening a file
+	log.Printf("\n=======================\nOpen Flags: (0x%v)\n=======================\n", strconv.FormatInt(int64(flags), 16))
 
-    // Check custom permissions for opening the file
-    // Lookup metadata entry
-    herr, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-    if herr == nil { // If we found custom metadata
-        log.Println("Checking custom metadata for OPEN permission")
-        allowed := permissions.CheckOpenPermissions(ctx, fileMetadata, flags)
-        if !allowed {
-            log.Println("Not allowed!")
-            return nil, 0, syscall.EACCES
-        }
-    }
+	// Check custom permissions for opening the file
+	// Lookup metadata entry
+	herr, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	if herr == nil { // If we found custom metadata
+		log.Println("Checking custom metadata for OPEN permission")
+		allowed := permissions.CheckOpenPermissions(ctx, fileMetadata, flags)
+		if !allowed {
+			log.Println("Not allowed!")
+			return nil, 0, syscall.EACCES
+		}
+	}
 
 	fileDescriptor, err := syscall.Open(path, int(flags), 0666) // try to open the file at path
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
-	} 
+	}
 
 	// Creates a custom filehandle from the returned file descriptor from Open
 	optiFile := NewOptiFSFile(fileDescriptor, n.GetAttr(), flags, n.currentHash, n.refNum)
@@ -344,22 +342,22 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
 	//log.Println("ENTERED GETXATTR")
 
-    // Check if the user has read access
-    err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-    if err1 == nil {
-        hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
-        if !hasRead {
-            return 0, syscall.EACCES
-        }
-    }
-    path := n.RPath()
-    err2, dirMetadata := metadata.LookupDirMetadata(path)
-    if err2 == nil {
-        hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
-        if !hasRead {
-            return 0, syscall.EACCES
-        }
-    }
+	// Check if the user has read access
+	err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	if err1 == nil {
+		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
+		if !hasRead {
+			return 0, syscall.EACCES
+		}
+	}
+	path := n.RPath()
+	err2, dirMetadata := metadata.LookupDirMetadata(path)
+	if err2 == nil {
+		hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
+		if !hasRead {
+			return 0, syscall.EACCES
+		}
+	}
 
 	// Pass it down to the filesystem below
 	attributeSize, err3 := unix.Lgetxattr(path, attr, dest)
@@ -370,22 +368,22 @@ func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (ui
 func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
 	//log.Println("ENTERED SETXATTR")
 
-    // Check if the user has write access
-    err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-    if err1 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
-        if !hasWrite {
-            return syscall.EACCES
-        }
-    }
-    path := n.RPath()
-    err2, dirMetadata := metadata.LookupDirMetadata(path)
-    if err2 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-        if !hasWrite {
-            return syscall.EACCES
-        }
-    }
+	// Check if the user has write access
+	err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	if err1 == nil {
+		hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
+		if !hasWrite {
+			return syscall.EACCES
+		}
+	}
+	path := n.RPath()
+	err2, dirMetadata := metadata.LookupDirMetadata(path)
+	if err2 == nil {
+		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+		if !hasWrite {
+			return syscall.EACCES
+		}
+	}
 
 	// Pass it down to the filesystem below
 	err3 := unix.Lsetxattr(path, attr, data, int(flags))
@@ -396,22 +394,22 @@ func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, fla
 func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
 	//log.Println("ENTERED REMOVEXATTR")
 
-    // Check if the user has write access
-    err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-    if err1 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
-        if !hasWrite {
-            return syscall.EACCES
-        }
-    }
-    path := n.RPath()
-    err2, dirMetadata := metadata.LookupDirMetadata(path)
-    if err2 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-        if !hasWrite {
-            return syscall.EACCES
-        }
-    }
+	// Check if the user has write access
+	err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	if err1 == nil {
+		hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
+		if !hasWrite {
+			return syscall.EACCES
+		}
+	}
+	path := n.RPath()
+	err2, dirMetadata := metadata.LookupDirMetadata(path)
+	if err2 == nil {
+		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+		if !hasWrite {
+			return syscall.EACCES
+		}
+	}
 
 	err3 := unix.Lremovexattr(path, attr)
 	return fs.ToErrno(err3)
@@ -421,22 +419,22 @@ func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno
 func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
 	//log.Println("ENTERED LISTXATTR")
 
-    // Check if the user has read access
-    err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-    if err1 == nil {
-        hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
-        if !hasRead {
-            return 0, syscall.EACCES
-        }
-    }
-    path := n.RPath()
-    err2, dirMetadata := metadata.LookupDirMetadata(path)
-    if err2 == nil {
-        hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
-        if !hasRead {
-            return 0, syscall.EACCES
-        }
-    }
+	// Check if the user has read access
+	err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	if err1 == nil {
+		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
+		if !hasRead {
+			return 0, syscall.EACCES
+		}
+	}
+	path := n.RPath()
+	err2, dirMetadata := metadata.LookupDirMetadata(path)
+	if err2 == nil {
+		hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
+		if !hasRead {
+			return 0, syscall.EACCES
+		}
+	}
 
 	// Pass it down to the filesystem below
 	allAttributesSize, err3 := unix.Llistxattr(path, dest)
@@ -445,64 +443,63 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 
 // Checks access of a node
 func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
-    log.Printf("Checking ACCESS for %v\n", n.RPath())
+	log.Printf("Checking ACCESS for %v\n", n.RPath())
 	// Prioritise custom metadata
 
-    // Check if custom metadata exists for a regular file
-    if err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum); err == nil {
-        // If there is no metadata, just perform a normal ACCESS on the underlying node
-        log.Println("Found custom regular file metadata, checking...")
-        isAllowed := permissions.CheckMask(ctx, mask, fileMetadata)
-        if !isAllowed {
-            return fs.ToErrno(syscall.EACCES)
-        }
-    }
+	// Check if custom metadata exists for a regular file
+	if err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum); err == nil {
+		// If there is no metadata, just perform a normal ACCESS on the underlying node
+		log.Println("Found custom regular file metadata, checking...")
+		isAllowed := permissions.CheckMask(ctx, mask, fileMetadata)
+		if !isAllowed {
+			return fs.ToErrno(syscall.EACCES)
+		}
+	}
 
-    // Check if custom metadata exists for a directory
-    path := n.RPath()
-    if err, dirMetadata := metadata.LookupDirMetadata(path); err == nil {
-        log.Println("Found custom directory metadata, checking...")
-        isAllowed := permissions.CheckMask(ctx, mask, dirMetadata)
-        if !isAllowed {
-            return fs.ToErrno(syscall.EACCES)
-        }
-    }
+	// Check if custom metadata exists for a directory
+	path := n.RPath()
+	if err, dirMetadata := metadata.LookupDirMetadata(path); err == nil {
+		log.Println("Found custom directory metadata, checking...")
+		isAllowed := permissions.CheckMask(ctx, mask, dirMetadata)
+		if !isAllowed {
+			return fs.ToErrno(syscall.EACCES)
+		}
+	}
 
-
-    // Otherwise, default the access to underlying filesystem
-    return fs.ToErrno(syscall.Access(n.RPath(), mask))
+	// Otherwise, default the access to underlying filesystem
+	return fs.ToErrno(syscall.Access(n.RPath(), mask))
 }
-
-
 
 // Make a directory
 func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	//log.Println("ENTERED MKDIR")
+	log.Println("ENTERED MKDIR")
 
 	filePath := filepath.Join(n.RPath(), name)
 
-    // Check write and execute permissions on the parent directory
-    err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-    if err1 == nil {
-        log.Println("Checking directory custom permissions")
-        writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
-        if !writePerm {
-            log.Println("Not allowed!")
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-        execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
-        if !execPerm {
-            log.Println("Not allowed!")
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-    }
-
+	// Check write and execute permissions on the parent directory
+	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
+	if err1 == nil {
+		log.Println("Checking directory custom permissions")
+		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
+		if !writePerm {
+			log.Println("Not allowed!")
+			return nil, fs.ToErrno(syscall.EACCES)
+		}
+		execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
+		if !execPerm {
+			log.Println("Not allowed!")
+			return nil, fs.ToErrno(syscall.EACCES)
+		}
+	}
 
 	// Create the directory
 	err2 := syscall.Mkdir(filePath, mode)
 	if err2 != nil {
 		return nil, fs.ToErrno(err2)
 	}
+	log.Println("Created the directory!")
+
+	log.Printf("Mode used: 0x%X\n", mode)
 
 	// Now stat the new directory, ensuring it was created
 	var directoryStatus syscall.Stat_t
@@ -510,26 +507,16 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 	if err2 != nil {
 		return nil, fs.ToErrno(err2)
 	}
+	log.Println("Statted the directory!")
 
-	// Fill the output attributes from out stat struct
-	out.Attr.FromStat(&directoryStatus)
+	log.Printf("Mode statted: 0x%X\n", directoryStatus.Mode)
 
-	// Create a new node to represent the underlying looked up file
-	// or directory in our VFS
-	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &directoryStatus)
+	// Handle the node instantiation
+	oErr, oInode, _ := HandleNodeInstantiation(ctx, n, filePath, name, &directoryStatus, out, nil, nil)
 
-    // Enter into our DirMetadata struct
-    attr := n.RootNode.idFromStat(&directoryStatus)
+	// Update our custom metadata system
 
-    // Update the directory metadata
-    metadata.CreateDirEntry(filePath)
-    metadata.UpdateDirEntry(filePath, &directoryStatus)
-
-	// Create the inode structure within FUSE, copying the underlying
-	// file's attributes with an auto generated inode in idFromStat
-	x := n.NewInode(ctx, nd, attr)
-
-	return x, fs.OK
+	return oInode, oErr
 }
 
 func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
@@ -552,22 +539,21 @@ func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
 // create a REGULAR FILE that doesn't exist, also fills in the gid/uid of the user into the file attributes
 func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, f fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 
-    // Check write and exec permissions on the parent directory
-    err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-    if err1 == nil {
-        log.Println("Checking directory custom permissions")
-        writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
-        if !writePerm {
-            log.Println("Not allowed!")
-            return nil, nil, 0, fs.ToErrno(syscall.EACCES)
-        }
-        execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
-        if !execPerm {
-            log.Println("Not allowed!")
-            return nil, nil, 0, fs.ToErrno(syscall.EACCES)
-        }
-    }
-
+	// Check write and exec permissions on the parent directory
+	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
+	if err1 == nil {
+		log.Println("Checking directory custom permissions")
+		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
+		if !writePerm {
+			log.Println("Not allowed!")
+			return nil, nil, 0, fs.ToErrno(syscall.EACCES)
+		}
+		execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
+		if !execPerm {
+			log.Println("Not allowed!")
+			return nil, nil, 0, fs.ToErrno(syscall.EACCES)
+		}
+	}
 
 	filePath := filepath.Join(n.RPath(), name) // create the path for the new file
 
@@ -588,40 +574,30 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 		return nil, nil, 0, fs.ToErrno(err)
 	}
 
-	// Create a new node to represent the underlying looked up file
-	// or directory in our VFS
-	nd := n.RootNode.newNode(n.EmbeddedInode(), name, &s)
+    oErr, oNode, oFile := HandleNodeInstantiation(ctx, n, filePath, name, &s, out, &fdesc, &flags)
 
-	// Create the inode structure within FUSE, copying the underlying
-	// file's attributes with an auto generated inode in idFromStat
-	x := n.NewInode(ctx, nd, n.RootNode.idFromStat(&s))
-
-	newFile := NewOptiFSFile(fdesc, n.GetAttr(), flags, n.currentHash, n.refNum) // make filehandle for file operations
-
-	out.FromStat(&s) // fill out info
-
-	return x, newFile, 0, fs.OK
+	return oNode, oFile, 0, oErr
 }
 
 // Unlinks (removes) a file
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	log.Printf("UNLINK performed on %v from node %v\n", name, n.RPath())
 
-    // Check write and exec permissions on the parent directory
-    err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-    if err1 == nil {
-        log.Println("Checking directory custom permissions")
-        writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
-        if !writePerm {
-            log.Println("Not allowed!")
-            return fs.ToErrno(syscall.EACCES)
-        }
-        execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
-        if !execPerm {
-            log.Println("Not allowed!")
-            return fs.ToErrno(syscall.EACCES)
-        }
-    }
+	// Check write and exec permissions on the parent directory
+	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
+	if err1 == nil {
+		log.Println("Checking directory custom permissions")
+		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
+		if !writePerm {
+			log.Println("Not allowed!")
+			return fs.ToErrno(syscall.EACCES)
+		}
+		execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
+		if !execPerm {
+			log.Println("Not allowed!")
+			return fs.ToErrno(syscall.EACCES)
+		}
+	}
 
 	// Flag for custom metadata existing
 	var customExists bool
@@ -631,7 +607,7 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 	// Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
 	// for custom metadata to cleanup
-	herr, contentHash, refNum := metadata.RetrieveNodeInfo(filePath)
+	herr, _, _, _, contentHash, refNum := metadata.RetrieveNodeInfo(filePath)
 	if herr == nil {
 		// Mark if it exists
 		customExists = true
@@ -654,29 +630,29 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 // Unlinks (removes) a directory
 func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 
-    // Check exec and write permissions on the parent directory
-    // Don't need to check the directory being removed, as it must be empty to be removed
-    err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-    if err1 == nil {
-        log.Println("Checking directory custom permissions")
-        writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
-        if !writePerm {
-            log.Println("Not allowed!")
-            return fs.ToErrno(syscall.EACCES)
-        }
-        execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
-        if !execPerm {
-            log.Println("Not allowed!")
-            return fs.ToErrno(syscall.EACCES)
-        }
-    }
-
+	// Check exec and write permissions on the parent directory
+	// Don't need to check the directory being removed, as it must be empty to be removed
+	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
+	if err1 == nil {
+		log.Println("Checking directory custom permissions")
+		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
+		if !writePerm {
+			log.Println("Not allowed!")
+			return fs.ToErrno(syscall.EACCES)
+		}
+		execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
+		if !execPerm {
+			log.Println("Not allowed!")
+			return fs.ToErrno(syscall.EACCES)
+		}
+	}
 
 	//log.Printf("RMDIR performed on %v from node %v\n", name, n.path())
 	filePath := filepath.Join(n.RPath(), name)
 
-    // See if we can remove the dir from our custom dir map first
-    metadata.RemoveDirEntry(filePath)
+	// See if we can remove the dir from our custom dir map first
+	metadata.RemoveDirEntry(filePath)
+	metadata.RemoveNodeInfo(filePath)
 
 	err := syscall.Rmdir(filePath)
 	return fs.ToErrno(err)
@@ -685,19 +661,70 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
 	//log.Println("ENTERED WRITE")
 	if f != nil {
-        // Check if we have permission to write to the file
-        err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-        if err == nil { // if it exists
-            writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1) // check write perm
-            if !writePerm {
-                return 0, syscall.EACCES
-            }
-        }
+		// Check if we have permission to write to the file
+		err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+		if err == nil { // if it exists
+			writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1) // check write perm
+			if !writePerm {
+				return 0, syscall.EACCES
+			}
+		}
 
-		written, errno := f.(fs.FileWriter).Write(ctx, data, off)
-		// Update the node's metadata info with the file's current hash and refnum
-		n.updateNodeContentHashAndRefNum(f.(*OptiFSFile).currentHash, f.(*OptiFSFile).refNum)
-		return written, errno
+		// Asset that the file is an OptiFSFile
+		OptiF := f.(*OptiFSFile)
+
+		OptiF.mu.Lock()
+		defer OptiF.mu.Unlock()
+
+		// Keep the old metadata if it exists
+		err1, oldMetadata := metadata.LookupRegularFileMetadata(OptiF.currentHash, OptiF.refNum)
+
+		// Hash the current contents
+		OptiF.currentHash = hashing.HashContents(data, OptiF.flags)
+		// Check to see if it's unique
+		isUnique, _ := metadata.IsContentHashUnique(OptiF.currentHash)
+
+		// TODO: I think it should only be created in Create syscall, not write - or maybe not idk, need to think
+
+		// If it's unique - CREATE a new MapEntry
+		if isUnique {
+			metadata.CreateRegularFileMapEntry(OptiF.currentHash)
+			// If it already exists, simply retrieve it
+		}
+
+		err2, entry := metadata.LookupRegularFileEntry(OptiF.currentHash)
+		if err2 != nil {
+			return 0, fs.ToErrno(syscall.EAGAIN) // return EAGAIN if we error here, not sure what is appropriate...
+		}
+
+		// Create a new MapEntryMetadata instance
+		refNum, fileMetadata := metadata.CreateRegularFileMetadata(entry)
+		// Set the file handle's refnum to the entry
+		OptiF.refNum = refNum
+
+		// Update our persistence hash
+		metadata.UpdateNodeInfo(n.RPath(), nil, nil, nil, &OptiF.currentHash, &OptiF.refNum)
+
+		// Perform the write
+
+		// TODO: Set up links if non-unique NEEDS TO BE ATOMIC ( gon' be hard :( )
+		numOfBytesWritten, werr := syscall.Pwrite(OptiF.fdesc, data, off)
+
+		// Fill in the MapEntryMetadata object
+		var st syscall.Stat_t
+		serr := syscall.Fstat(OptiF.fdesc, &st)
+		if serr != nil {
+			return 0, fs.ToErrno(serr)
+		}
+
+		if err1 == nil { // If we had old metadata, keep aspects of it
+			metadata.MigrateRegularFileMetadata(oldMetadata, fileMetadata, &st)
+		} else { // If we don't have old metadata, do a full copy of the underlying node's metadata
+			stableAttr := n.StableAttr()
+			metadata.FullMapEntryMetadataUpdate(fileMetadata, &st, &stableAttr)
+		}
+
+		return uint32(numOfBytesWritten), fs.ToErrno(werr)
 	}
 
 	//log.Println("WRITE - EBADFD")
@@ -726,14 +753,14 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
 	//log.Println("ENTERED FSYNC")
 	if f != nil {
-        // Check write permission
-        err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-        if err == nil {
-            writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1)
-            if !writePerm {
-                return fs.ToErrno(syscall.EACCES)
-            }
-        }
+		// Check write permission
+		err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+		if err == nil {
+			writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1)
+			if !writePerm {
+				return fs.ToErrno(syscall.EACCES)
+			}
+		}
 
 		return f.(fs.FileFsyncer).Fsync(ctx, flags)
 	}
@@ -771,226 +798,228 @@ func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, 
 
 // Moves a node to a different directory. Change is only reflected in the filetree IFF returns fs.OK
 // From go-fuse/fs/loopback.go
-func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
-    // Check write and exec permissions of source and target directories
-    path := n.RPath()
-    err1, dir1Metadata := metadata.LookupDirMetadata(path)
-    err2, dir2Metadata := metadata.LookupDirMetadata(newParent.EmbeddedInode().Path(nil))
-    if err1 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, dir1Metadata, 1)
-        if !hasWrite {
-            return fs.ToErrno(syscall.EACCES)
-        }
-        hasExec := permissions.CheckPermissions(ctx, dir1Metadata, 2)
-        if !hasExec {
-            return fs.ToErrno(syscall.EACCES)
-        }
-    }
-    if err2 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, dir2Metadata, 1)
-        if !hasWrite {
-            return fs.ToErrno(syscall.EACCES)
-        }
-        hasExec := permissions.CheckPermissions(ctx, dir2Metadata, 2)
-        if !hasExec {
-            return fs.ToErrno(syscall.EACCES)
-        }
-    }
-
-	// IFF this operation is to be done atomically (which is a far more delicate operation)
-	if flags&unix.RENAME_EXCHANGE != 0 {
-		n.renameExchange(name, newParent, newName)
-	}
-
-	// Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
-	p1 := filepath.Join(n.RPath(), name)
-	p2 := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
-
-	err3 := syscall.Rename(p1, p2)
-	return fs.ToErrno(err3)
-}
+//func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+//	// Check write and exec permissions of source and target directories
+//	path := n.RPath()
+//	err1, dir1Metadata := metadata.LookupDirMetadata(path)
+//	err2, dir2Metadata := metadata.LookupDirMetadata(newParent.EmbeddedInode().Path(nil))
+//	if err1 == nil {
+//		hasWrite := permissions.CheckPermissions(ctx, dir1Metadata, 1)
+//		if !hasWrite {
+//			return fs.ToErrno(syscall.EACCES)
+//		}
+//		hasExec := permissions.CheckPermissions(ctx, dir1Metadata, 2)
+//		if !hasExec {
+//			return fs.ToErrno(syscall.EACCES)
+//		}
+//	}
+//	if err2 == nil {
+//		hasWrite := permissions.CheckPermissions(ctx, dir2Metadata, 1)
+//		if !hasWrite {
+//			return fs.ToErrno(syscall.EACCES)
+//		}
+//		hasExec := permissions.CheckPermissions(ctx, dir2Metadata, 2)
+//		if !hasExec {
+//			return fs.ToErrno(syscall.EACCES)
+//		}
+//	}
+//
+//	// IFF this operation is to be done atomically (which is a far more delicate operation)
+//	if flags&unix.RENAME_EXCHANGE != 0 {
+//		n.renameExchange(name, newParent, newName)
+//	}
+//
+//	// Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
+//	p1 := filepath.Join(n.RPath(), name)
+//	p2 := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
+//
+//	err3 := syscall.Rename(p1, p2)
+//	return fs.ToErrno(err3)
+//}
 
 // Handles the name exchange of two inodes
 //
 // Adapted from go-fuse/fs/loopback.go
-func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
-	// Open the directory of the current node
-	currDirFd, err := syscall.Open(n.RPath(), syscall.O_DIRECTORY, 0)
-	if err != nil {
-		return fs.ToErrno(err)
-	}
-	defer syscall.Close(currDirFd)
-
-	// Open the new parent directory
-	newParentDirPath := filepath.Join(n.RootNode.Path, newparent.EmbeddedInode().Path(nil))
-	newParentDirFd, err := syscall.Open(newParentDirPath, syscall.O_DIRECTORY, 0)
-	if err != nil {
-		return fs.ToErrno(err)
-	}
-	defer syscall.Close(currDirFd)
-
-	// Get the directory status for data integrity checks
-	var st syscall.Stat_t
-	if err := syscall.Fstat(currDirFd, &st); err != nil {
-		return fs.ToErrno(err)
-	}
-
-	inode := &n.Inode
-	// Check to see if the user is trying to move the root directory, and that the inode number
-	// is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
-	if inode.Root() != inode && inode.StableAttr().Ino != n.RootNode.idFromStat(&st).Ino {
-		// Return EBUSY if there is something amiss - suggesting the resource is busy
-		return syscall.EBUSY
-	}
-
-	// Check the status of the new parent directory
-	if err := syscall.Fstat(newParentDirFd, &st); err != nil {
-		return fs.ToErrno(err)
-	}
-
-	newParentDirInode := newparent.EmbeddedInode()
-	// Ensure that the new directory isn't the root node, and that the inodes match up, same
-	// consistency checks as above
-	if newParentDirInode.Root() != newParentDirInode && newParentDirInode.StableAttr().Ino != n.RootNode.idFromStat(&st).Ino {
-		return syscall.EBUSY
-	}
-
-	// Perform the actual rename operation
-	// Use Renameat2, an advanced version of Rename which accepts flags, which itself is an
-	// extension of the rename syscall. Use RENAME_EXCHANGE as this forces the exchange to
-	// occur atomically - avoiding race conditions
-	return fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
-}
+//func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
+//	// Open the directory of the current node
+//
+//    path := n.RPath()
+//
+//	currDirFd, err := syscall.Open(path, syscall.O_DIRECTORY, 0)
+//	if err != nil {
+//		return fs.ToErrno(err)
+//	}
+//	defer syscall.Close(currDirFd)
+//
+//	// Open the new parent directory
+//	newParentDirPath := filepath.Join(n.RootNode.Path, newparent.EmbeddedInode().Path(nil))
+//	newParentDirFd, err := syscall.Open(newParentDirPath, syscall.O_DIRECTORY, 0)
+//	if err != nil {
+//		return fs.ToErrno(err)
+//	}
+//	defer syscall.Close(currDirFd)
+//
+//	// Get the directory status for data integrity checks
+//	var st syscall.Stat_t
+//	if err := syscall.Fstat(currDirFd, &st); err != nil {
+//		return fs.ToErrno(err)
+//	}
+//
+//	inode := &n.Inode
+//	// Check to see if the user is trying to move the root directory, and that the inode number
+//	// is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
+//	if inode.Root() != inode && inode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &path).Ino {
+//		// Return EBUSY if there is something amiss - suggesting the resource is busy
+//		return syscall.EBUSY
+//	}
+//
+//	// Check the status of the new parent directory
+//	if err := syscall.Fstat(newParentDirFd, &st); err != nil {
+//		return fs.ToErrno(err)
+//	}
+//
+//	newParentDirInode := newparent.EmbeddedInode()
+//	// Ensure that the new directory isn't the root node, and that the inodes match up, same
+//	// consistency checks as above
+//	if newParentDirInode.Root() != newParentDirInode && newParentDirInode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &newParentDirPath).Ino {
+//		return syscall.EBUSY
+//	}
+//
+//	// Perform the actual rename operation
+//	// Use Renameat2, an advanced version of Rename which accepts flags, which itself is an
+//	// extension of the rename syscall. Use RENAME_EXCHANGE as this forces the exchange to
+//	// occur atomically - avoiding race conditions
+//	return fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
+//}
 
 // Creates a node that isn't a regular file/dir/node - like device nodes or pipes
-func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-
-    path := n.RPath()
-
-    // Check the write and execute permissions of the parent directory
-    err1, dirMetadata := metadata.LookupDirMetadata(path)
-    if err1 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-        if !hasWrite {
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-        hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
-        if !hasExec {
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-    }
-
-	// Create the path of the node to be created
-	nodePath := filepath.Join(path, name)
-	// Create the node
-	if err := syscall.Mknod(nodePath, mode, int(dev)); err != nil {
-		return nil, fs.ToErrno(err)
-	}
-
-	// Keep the owner
-	n.setOwner(ctx, nodePath)
-
-	st := syscall.Stat_t{}
-	if err := syscall.Lstat(nodePath, &st); err != nil {
-		// Kill the node if we can't Lstat it - something went wrong
-		syscall.Unlink(nodePath)
-		return nil, fs.ToErrno(err)
-	}
-
-	// Fill in the out attributes
-	out.Attr.FromStat(&st)
-
-	// Create a fuse node to represent this new node
-	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
-
-	// Actually create the node within FUSE
-	x := n.NewInode(ctx, newNode, n.RootNode.idFromStat(&st))
-
-	return x, fs.OK
-}
-
-// Handles the creation of hardlinks
-func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
-    // Check write and execute permissions on the source directory
-    err1, dirMetadata := metadata.LookupDirMetadata(target.EmbeddedInode().Path(nil))
-    if err1 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-        if !hasWrite {
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-        hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
-        if !hasExec {
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-    }
-
-
-	// Construct the full paths
-	sourcePath := filepath.Join(n.RootNode.Path, target.EmbeddedInode().Path(nil))
-	targetPath := filepath.Join(n.RPath(), name)
-	if err := syscall.Link(sourcePath, targetPath); err != nil {
-		return nil, fs.ToErrno(err)
-	}
-
-	// Get the status of this new hard link
-	st := syscall.Stat_t{}
-	if err := syscall.Stat(targetPath, &st); err != nil {
-		syscall.Unlink(targetPath)
-		return nil, fs.ToErrno(nil)
-	}
-
-	// Fill in the out attributes
-	out.Attr.FromStat(&st)
-
-	// Actually create the fuse node to represent this link
-	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
-	x := n.NewInode(ctx, newNode, n.RootNode.idFromStat(&st))
-
-	return x, fs.OK
-}
-
-func (n *OptiFSNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
-
-    // Check write and execute permissions on the target directory
-    err1, dirMetadata := metadata.LookupDirMetadata(target)
-    if err1 == nil {
-        hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-        if !hasWrite {
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-        hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
-        if !hasExec {
-            return nil, fs.ToErrno(syscall.EACCES)
-        }
-    }
-
-	// Construct the paths
-	sourcePath := filepath.Join(n.RootNode.Path, target)
-	targetPath := filepath.Join(n.RPath(), name)
-
-	// Perform the hardlink in the underlying file system
-	if err := syscall.Symlink(sourcePath, targetPath); err != nil {
-		return nil, fs.ToErrno(err)
-	}
-
-	// Set the owner to the creator
-	n.setOwner(ctx, targetPath)
-
-	st := syscall.Stat_t{}
-	if err := syscall.Lstat(targetPath, &st); err != nil {
-		syscall.Unlink(targetPath)
-		return nil, fs.ToErrno(err)
-	}
-
-	// Fill the attributes in out
-	out.Attr.FromStat(&st)
-
-	// Create the FUSE node to represent the symlink
-	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
-	x := n.NewInode(ctx, newNode, n.RootNode.idFromStat(&st))
-
-	return x, fs.OK
-}
+//func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+//
+//	path := n.RPath()
+//
+//	// Check the write and execute permissions of the parent directory
+//	err1, dirMetadata := metadata.LookupDirMetadata(path)
+//	if err1 == nil {
+//		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+//		if !hasWrite {
+//			return nil, fs.ToErrno(syscall.EACCES)
+//		}
+//		hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
+//		if !hasExec {
+//			return nil, fs.ToErrno(syscall.EACCES)
+//		}
+//	}
+//
+//	// Create the path of the node to be created
+//	nodePath := filepath.Join(path, name)
+//	// Create the node
+//	if err := syscall.Mknod(nodePath, mode, int(dev)); err != nil {
+//		return nil, fs.ToErrno(err)
+//	}
+//
+//	// Keep the owner
+//	n.setOwner(ctx, nodePath)
+//
+//	st := syscall.Stat_t{}
+//	if err := syscall.Lstat(nodePath, &st); err != nil {
+//		// Kill the node if we can't Lstat it - something went wrong
+//		syscall.Unlink(nodePath)
+//		return nil, fs.ToErrno(err)
+//	}
+//
+//	// Fill in the out attributes
+//	out.Attr.FromStat(&st)
+//
+//	// Create a fuse node to represent this new node
+//	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
+//
+//	// Actually create the node within FUSE
+//	x := n.NewInode(ctx, newNode, n.RootNode.getStableAttr(&st, &nodePath))
+//
+//	return x, fs.OK
+//}
+//
+//// Handles the creation of hardlinks
+//func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
+//	// Check write and execute permissions on the source directory
+//	err1, dirMetadata := metadata.LookupDirMetadata(target.EmbeddedInode().Path(nil))
+//	if err1 == nil {
+//		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+//		if !hasWrite {
+//			return nil, fs.ToErrno(syscall.EACCES)
+//		}
+//		hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
+//		if !hasExec {
+//			return nil, fs.ToErrno(syscall.EACCES)
+//		}
+//	}
+//
+//	// Construct the full paths
+//	sourcePath := filepath.Join(n.RootNode.Path, target.EmbeddedInode().Path(nil))
+//	targetPath := filepath.Join(n.RPath(), name)
+//	if err := syscall.Link(sourcePath, targetPath); err != nil {
+//		return nil, fs.ToErrno(err)
+//	}
+//
+//	// Get the status of this new hard link
+//	st := syscall.Stat_t{}
+//	if err := syscall.Stat(targetPath, &st); err != nil {
+//		syscall.Unlink(targetPath)
+//		return nil, fs.ToErrno(nil)
+//	}
+//
+//	// Fill in the out attributes
+//	out.Attr.FromStat(&st)
+//
+//	// Actually create the fuse node to represent this link
+//	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
+//	x := n.NewInode(ctx, newNode, n.RootNode.getStableAttr(&st, &targetPath))
+//
+//	return x, fs.OK
+//}
+//
+//func (n *OptiFSNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
+//
+//	// Check write and execute permissions on the target directory
+//	err1, dirMetadata := metadata.LookupDirMetadata(target)
+//	if err1 == nil {
+//		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+//		if !hasWrite {
+//			return nil, fs.ToErrno(syscall.EACCES)
+//		}
+//		hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
+//		if !hasExec {
+//			return nil, fs.ToErrno(syscall.EACCES)
+//		}
+//	}
+//
+//	// Construct the paths
+//	sourcePath := filepath.Join(n.RootNode.Path, target)
+//	targetPath := filepath.Join(n.RPath(), name)
+//
+//	// Perform the hardlink in the underlying file system
+//	if err := syscall.Symlink(sourcePath, targetPath); err != nil {
+//		return nil, fs.ToErrno(err)
+//	}
+//
+//	// Set the owner to the creator
+//	n.setOwner(ctx, targetPath)
+//
+//	st := syscall.Stat_t{}
+//	if err := syscall.Lstat(targetPath, &st); err != nil {
+//		syscall.Unlink(targetPath)
+//		return nil, fs.ToErrno(err)
+//	}
+//
+//	// Fill the attributes in out
+//	out.Attr.FromStat(&st)
+//
+//	// Create the FUSE node to represent the symlink
+//	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
+//	x := n.NewInode(ctx, newNode, n.RootNode.getStableAttr(&st, &targetPath))
+//
+//	return x, fs.OK
+//}
 
 // Handles reading a symlink
 func (n *OptiFSNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {

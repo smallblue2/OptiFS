@@ -226,3 +226,107 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 
 	return fs.OK
 }
+
+// Handles the creation of virtual nodes, ensuring we check and prioritise our persistent store to maintain data persistence
+func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string, name string, s *syscall.Stat_t, out *fuse.EntryOut, fdesc *int, flags *uint32) (syscall.Errno, *fs.Inode, *OptiFSFile) {
+    
+    log.Println("Handling Node Instantiation")
+
+    var fh *OptiFSFile
+
+    // TRY AND FIND CUSTOM NODE
+    ferr, existingStableAttr, _, isDir, existingHash, existingRef  := metadata.RetrieveNodeInfo(nodePath)
+    if ferr != nil { // If custom node doesn't exist, create a new one
+
+        log.Println("Persistent node entry doesn't exist")
+
+        log.Printf("Mode: 0x%X\n", s.Mode)
+
+        // Create a new node to represent the underlying looked up file
+        // or directory in our VFS
+        nd := n.RootNode.newNode(n.EmbeddedInode(), name, s)
+        log.Println("Created new InodeEmbedder")
+
+        // Create the inode structure within FUSE, copying the underlying
+        // file's attributes with an auto generated inode in idFromStat
+        newStable := n.RootNode.getNewStableAttr(s, &nodePath)
+        log.Printf("Mode inside newStable: 0x%X\n", newStable.Mode)
+        x := n.NewInode(ctx, nd, newStable)
+        log.Println("Created Inode")
+
+        log.Printf("Mode: 0x%X\n", x.StableAttr())
+
+        // Fill the output attributes from out stat struct
+        out.Attr.FromStat(s)
+        log.Println("Filled out from stat")
+
+        // Check if the lookup is for a directory or not
+        stable := x.StableAttr()
+        if s.Mode&syscall.S_IFMT == syscall.S_IFDIR {
+            // Store the persistent data
+            metadata.StoreDirInfo(nodePath, &stable, s.Mode)
+            log.Println("STORED DIRECTORY PERSISTENT DATA")
+            // Create and store the custom metadata
+            metadata.CreateDirEntry(nodePath)
+            metadata.UpdateDirEntry(nodePath, s, &stable)
+            log.Println("STORED DIRECTORY CUSTOM METADATA")
+        } else {
+            // Store the persistent data
+            log.Println("STORED REGULAR FILE PERSISTENT DATA")
+            metadata.StoreRegFileInfo(nodePath, &stable, s.Mode, [64]byte{}, 0)
+            // Don't create a custom metadata entry here;
+            //     custom metadata for regular files are indexed by their content's index
+        }
+
+        if fdesc != nil && flags != nil {
+            fh = NewOptiFSFile(*fdesc, stable, *flags, [64]byte{}, 0)
+        }
+
+        return fs.OK, x, fh
+    }
+
+    log.Printf("Found existing persistent node entry - ISDIR: {%v} REFNUM {%v} HASH {%+v}\n", isDir, existingRef, existingHash)
+
+    var nd fs.InodeEmbedder
+    // Create a node with the existing attributes we found
+    if !isDir {
+        log.Println("IS a regular file!")
+
+        nd = n.RootNode.existingNode(existingHash, existingRef)
+        log.Println("Created existing InodeEmbedder!")
+
+        cerr, customMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
+        if cerr != nil {
+            // Assume an empty file
+            log.Println("Must be an empty file")
+            // TODO: Do we need to do anything special here?
+        }
+
+        metadata.FillAttr(customMetadata, &out.Attr)
+        log.Println("Filled out attributes with custom metadata!")
+
+        if fdesc != nil && flags != nil {
+            fh = NewOptiFSFile(*fdesc, *existingStableAttr, *flags, existingHash, existingRef)
+        }
+    } else {
+        log.Println("IS a directory!")
+
+        nd = n.RootNode.newNode(n.EmbeddedInode(), name, s)
+        log.Println("Created new InodeEmbedder!")
+
+        cerr, customMetadata := metadata.LookupDirMetadata(nodePath)
+        if cerr != nil {
+            log.Println("No custom metadata found - EXITING!")
+            return fs.ToErrno(syscall.ENODATA), nil, nil
+        }
+        metadata.FillAttr(customMetadata, &out.Attr)
+        log.Println("Filled out attributes with custom metadata!")
+    }
+
+    // Create the inode structure within FUSE
+    x := n.NewInode(ctx, nd, *existingStableAttr)
+
+    log.Println("Created Inode")
+
+    return fs.OK, x, fh
+}
