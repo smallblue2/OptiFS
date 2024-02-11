@@ -79,7 +79,7 @@ var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))  // find conflicting locks for give
 var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))  // gets a lock on a node
 var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil)) // gets a lock on a node, waits for it to be ready
 // var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))    // Changes the directory a node is in
-// var _ = (fs.NodeMknoder)((*OptiFSNode)(nil))    // Similar to lookup, but creates the inode
+var _ = (fs.NodeMknoder)((*OptiFSNode)(nil))    // Similar to lookup, but creates the inode
 // var _ = (fs.NodeLinker)((*OptiFSNode)(nil))     // For handling hard links
 // var _ = (fs.NodeSymlinker)((*OptiFSNode)(nil))  // For handling hard links
 var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil)) // For reading symlinks
@@ -893,51 +893,45 @@ func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, 
 //}
 
 // Creates a node that isn't a regular file/dir/node - like device nodes or pipes
-//func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-//
-//	path := n.RPath()
-//
-//	// Check the write and execute permissions of the parent directory
-//	err1, dirMetadata := metadata.LookupDirMetadata(path)
-//	if err1 == nil {
-//		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-//		if !hasWrite {
-//			return nil, fs.ToErrno(syscall.EACCES)
-//		}
-//		hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
-//		if !hasExec {
-//			return nil, fs.ToErrno(syscall.EACCES)
-//		}
-//	}
-//
-//	// Create the path of the node to be created
-//	nodePath := filepath.Join(path, name)
-//	// Create the node
-//	if err := syscall.Mknod(nodePath, mode, int(dev)); err != nil {
-//		return nil, fs.ToErrno(err)
-//	}
-//
-//	// Keep the owner
-//	n.setOwner(ctx, nodePath)
-//
-//	st := syscall.Stat_t{}
-//	if err := syscall.Lstat(nodePath, &st); err != nil {
-//		// Kill the node if we can't Lstat it - something went wrong
-//		syscall.Unlink(nodePath)
-//		return nil, fs.ToErrno(err)
-//	}
-//
-//	// Fill in the out attributes
-//	out.Attr.FromStat(&st)
-//
-//	// Create a fuse node to represent this new node
-//	newNode := n.RootNode.newNode(n.EmbeddedInode(), name, &st)
-//
-//	// Actually create the node within FUSE
-//	x := n.NewInode(ctx, newNode, n.RootNode.getStableAttr(&st, &nodePath))
-//
-//	return x, fs.OK
-//}
+func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+
+	path := n.RPath()
+
+	// Check the write and execute permissions of the parent directory
+	err1, dirMetadata := metadata.LookupDirMetadata(path)
+	if err1 == nil {
+		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+		if !hasWrite {
+			return nil, fs.ToErrno(syscall.EACCES)
+		}
+		hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
+		if !hasExec {
+			return nil, fs.ToErrno(syscall.EACCES)
+		}
+	}
+
+	// Create the path of the node to be created
+	nodePath := filepath.Join(path, name)
+	// Create the node
+	if err := syscall.Mknod(nodePath, mode, int(dev)); err != nil {
+		return nil, fs.ToErrno(err)
+	}
+
+	// Keep the owner
+	n.setOwner(ctx, nodePath)
+
+	st := syscall.Stat_t{}
+	if err := syscall.Lstat(nodePath, &st); err != nil {
+		// Kill the node if we can't Lstat it - something went wrong
+		syscall.Unlink(nodePath)
+		return nil, fs.ToErrno(err)
+	}
+
+    // Handle the creation of a new node
+    oErr, oNode, _ := HandleNodeInstantiation(ctx, n, nodePath, name, &st, out, nil, nil)
+
+	return oNode, oErr
+}
 //
 //// Handles the creation of hardlinks
 //func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
