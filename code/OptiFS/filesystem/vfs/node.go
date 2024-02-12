@@ -798,99 +798,161 @@ func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, 
 
 // Moves a node to a different directory. Change is only reflected in the filetree IFF returns fs.OK
 // From go-fuse/fs/loopback.go
-//func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
-//	// Check write and exec permissions of source and target directories
-//	path := n.RPath()
-//	err1, dir1Metadata := metadata.LookupDirMetadata(path)
-//	err2, dir2Metadata := metadata.LookupDirMetadata(newParent.EmbeddedInode().Path(nil))
-//	if err1 == nil {
-//		hasWrite := permissions.CheckPermissions(ctx, dir1Metadata, 1)
-//		if !hasWrite {
-//			return fs.ToErrno(syscall.EACCES)
-//		}
-//		hasExec := permissions.CheckPermissions(ctx, dir1Metadata, 2)
-//		if !hasExec {
-//			return fs.ToErrno(syscall.EACCES)
-//		}
-//	}
-//	if err2 == nil {
-//		hasWrite := permissions.CheckPermissions(ctx, dir2Metadata, 1)
-//		if !hasWrite {
-//			return fs.ToErrno(syscall.EACCES)
-//		}
-//		hasExec := permissions.CheckPermissions(ctx, dir2Metadata, 2)
-//		if !hasExec {
-//			return fs.ToErrno(syscall.EACCES)
-//		}
-//	}
-//
-//	// IFF this operation is to be done atomically (which is a far more delicate operation)
-//	if flags&unix.RENAME_EXCHANGE != 0 {
-//		n.renameExchange(name, newParent, newName)
-//	}
-//
-//	// Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
-//	p1 := filepath.Join(n.RPath(), name)
-//	p2 := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
-//
-//	err3 := syscall.Rename(p1, p2)
-//	return fs.ToErrno(err3)
-//}
+func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+
+    log.Println("Entered RENAME")
+
+	// Check write and exec permissions of source and target directories
+	path := n.RPath()
+	err1, dir1Metadata := metadata.LookupDirMetadata(path)
+	err2, dir2Metadata := metadata.LookupDirMetadata(newParent.EmbeddedInode().Path(nil))
+	if err1 == nil {
+		hasWrite := permissions.CheckPermissions(ctx, dir1Metadata, 1)
+		if !hasWrite {
+			return fs.ToErrno(syscall.EACCES)
+		}
+		hasExec := permissions.CheckPermissions(ctx, dir1Metadata, 2)
+		if !hasExec {
+			return fs.ToErrno(syscall.EACCES)
+		}
+	}
+	if err2 == nil {
+		hasWrite := permissions.CheckPermissions(ctx, dir2Metadata, 1)
+		if !hasWrite {
+			return fs.ToErrno(syscall.EACCES)
+		}
+		hasExec := permissions.CheckPermissions(ctx, dir2Metadata, 2)
+		if !hasExec {
+			return fs.ToErrno(syscall.EACCES)
+		}
+	}
+
+    log.Println("Have permission to rename in source and target directories!")
+
+    // Before moving, check whether it's a directory or not
+    originalPath := filepath.Join(n.RPath(), name)
+    newPath := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
+    lErr, lAttr, lMode, lIsDir, lHash, lRef := metadata.RetrieveNodeInfo(originalPath)
+    if lErr != nil {
+        log.Println("Entry doesn't exist in our persistent store - big error, why doesn't it??")
+        return fs.ToErrno(syscall.ENOENT)
+    }
+
+    var returnErr syscall.Errno
+	// IFF this operation is to be done atomically (which is a more delicate operation)
+	if flags&unix.RENAME_EXCHANGE != 0 {
+		returnErr = n.renameExchange(name, newParent, newName)
+	} else {
+        // Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
+        tmp := syscall.Rename(originalPath, newPath)
+        returnErr = fs.ToErrno(tmp)
+        log.Println("Performed normal rename")
+    }
+
+    // Update our storages IFF we got fs.OK
+    if returnErr == fs.OK {
+        log.Println("Rename suceeded!")
+        // Remove the old entry
+        metadata.RemoveNodeInfo(originalPath)
+        log.Println("Removed old persistent entry")
+        if lIsDir { // If it's a directory
+            metadata.StoreDirInfo(newPath, lAttr, lMode)
+            // Copy the old metadata over since directory custom metadata is
+            // indexed by path
+            tmpErr, tmpMetadata := metadata.LookupDirMetadata(originalPath)
+            if tmpErr != nil {
+                log.Println("PANIC AHHHHH")
+                return returnErr
+            }
+            metadataPointer := metadata.CreateDirEntry(newPath)
+            (*metadataPointer) = *tmpMetadata
+            // Delete old entry
+            metadata.RemoveDirEntry(originalPath)
+            log.Println("Updated new dir entry")
+        } else { // If it's a regfile
+            metadata.StoreRegFileInfo(newPath, lAttr, lMode, lHash, lRef)
+            log.Println("Updated new regfile entry")
+        }
+    }
+
+	return returnErr
+}
 
 // Handles the name exchange of two inodes
 //
 // Adapted from go-fuse/fs/loopback.go
-//func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
-//	// Open the directory of the current node
-//
-//    path := n.RPath()
-//
-//	currDirFd, err := syscall.Open(path, syscall.O_DIRECTORY, 0)
-//	if err != nil {
-//		return fs.ToErrno(err)
-//	}
-//	defer syscall.Close(currDirFd)
-//
-//	// Open the new parent directory
-//	newParentDirPath := filepath.Join(n.RootNode.Path, newparent.EmbeddedInode().Path(nil))
-//	newParentDirFd, err := syscall.Open(newParentDirPath, syscall.O_DIRECTORY, 0)
-//	if err != nil {
-//		return fs.ToErrno(err)
-//	}
-//	defer syscall.Close(currDirFd)
-//
-//	// Get the directory status for data integrity checks
-//	var st syscall.Stat_t
-//	if err := syscall.Fstat(currDirFd, &st); err != nil {
-//		return fs.ToErrno(err)
-//	}
-//
-//	inode := &n.Inode
-//	// Check to see if the user is trying to move the root directory, and that the inode number
-//	// is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
-//	if inode.Root() != inode && inode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &path).Ino {
-//		// Return EBUSY if there is something amiss - suggesting the resource is busy
-//		return syscall.EBUSY
-//	}
-//
-//	// Check the status of the new parent directory
-//	if err := syscall.Fstat(newParentDirFd, &st); err != nil {
-//		return fs.ToErrno(err)
-//	}
-//
-//	newParentDirInode := newparent.EmbeddedInode()
-//	// Ensure that the new directory isn't the root node, and that the inodes match up, same
-//	// consistency checks as above
-//	if newParentDirInode.Root() != newParentDirInode && newParentDirInode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &newParentDirPath).Ino {
-//		return syscall.EBUSY
-//	}
-//
-//	// Perform the actual rename operation
-//	// Use Renameat2, an advanced version of Rename which accepts flags, which itself is an
-//	// extension of the rename syscall. Use RENAME_EXCHANGE as this forces the exchange to
-//	// occur atomically - avoiding race conditions
-//	return fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
-//}
+func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
+	// Open the directory of the current node
+
+    log.Println("in renameExchange, sensitive rename")
+
+    path := n.RPath()
+
+	currDirFd, err := syscall.Open(path, syscall.O_DIRECTORY, 0)
+	if err != nil {
+        log.Printf("Error1 - %v\n", err)
+		return fs.ToErrno(err)
+	}
+	defer syscall.Close(currDirFd)
+
+	// Open the new parent directory
+	newParentDirPath := filepath.Join(n.RootNode.Path, newparent.EmbeddedInode().Path(nil))
+	newParentDirFd, err := syscall.Open(newParentDirPath, syscall.O_DIRECTORY, 0)
+	if err != nil {
+        log.Printf("Error2 - %v\n", err)
+		return fs.ToErrno(err)
+	}
+	defer syscall.Close(currDirFd)
+    log.Println("Opened newParentDir")
+
+	// Get the directory status for data integrity checks
+	//var st syscall.Stat_t
+	//if err := syscall.Fstat(currDirFd, &st); err != nil {
+    //    log.Printf("Error3 - %v\n", err)
+	//	return fs.ToErrno(err)
+	//}
+    // As the additional check below was removed we don't need this, best to keep it irregardless though
+
+	inode := &n.Inode
+	// Check to see if the user is trying to move the root directory, and that the inode number
+	// is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
+    //
+    // REMOVED: 'inode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &path).Ino' in this check due to our
+    //          custom attribute storage making it inacurrate - Do we need to replace this?
+	if inode.Root() != inode {
+		// Return EBUSY if there is something amiss - suggesting the resource is busy
+        log.Println("Check 1 failed")
+		return syscall.EBUSY
+	}
+    log.Println("Check 1 suceeded")
+
+	// Check the status of the new parent directory
+	//if err := syscall.Fstat(newParentDirFd, &st); err != nil {
+	//	return fs.ToErrno(err)
+	//}
+    // As the additional check below was removed we don't need this, best to keep it irregardless though
+
+	newParentDirInode := newparent.EmbeddedInode()
+	// Ensure that the new directory isn't the root node, and that the inodes match up, same
+	// consistency checks as above
+    //
+    // REMOVED: 'newParentDirInode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &newParentDirPath).Ino' in this check
+    //          due to our custom attribute storage making it inaccurate - Do we need to replace this?
+	if newParentDirInode.Root() != newParentDirInode {
+        log.Println("Check 2 failed")
+		return syscall.EBUSY
+	}
+    log.Println("Check 2 suceeded")
+
+	// Perform the actual rename operation
+	// Use Renameat2, an advanced version of Rename which accepts flags, which itself is an
+	// extension of the rename syscall. Use RENAME_EXCHANGE as this forces the exchange to
+	// occur atomically - avoiding race conditions
+    result := fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
+    log.Println("Performed renameat with RENAME_EXCHANGE flag")
+
+	return result
+}
 
 // Creates a node that isn't a regular file/dir/node - like device nodes or pipes
 func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
