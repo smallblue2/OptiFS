@@ -227,6 +227,37 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 	return fs.OK
 }
 
+// Handles the creation of intended hardlinks
+func HandleHardlinkInstantiation(ctx context.Context, n *OptiFSNode, targetPath, sourcePath, name string, s *syscall.Stat_t, out *fuse.EntryOut) (syscall.Errno, *fs.Inode) {
+    // Ensure that there is an existing entry for the source
+    sErr, sStableAttr, _, _, sHash, sRef := metadata.RetrieveNodeInfo(sourcePath)
+    if sErr != nil {
+        return syscall.ENOENT, nil
+    }
+
+    // Ensure that there ISNT an existing entry for the target
+    tErr, _, _, _, _, _ := metadata.RetrieveNodeInfo(targetPath)
+    if tErr == nil {
+        return syscall.EEXIST, nil
+    }
+
+    // Create a new node to represent the underlying hardlink
+    nd := n.RootNode.newNode(n.EmbeddedInode(), name, s)
+    log.Println("Created new InodeEmbedder")
+
+    // Create the inode structure within FUSE, using the SOURCE's stable attr
+    x := n.NewInode(ctx, nd, *sStableAttr)
+    log.Println("Created Inode")
+
+    out.Attr.FromStat(s)
+    log.Println("Filled out from stat")
+
+    // Persistently store the info
+    metadata.StoreRegFileInfo(targetPath, sStableAttr, s.Mode, sHash, sRef)
+
+    return fs.OK, x
+}
+
 // Handles the creation of virtual nodes, ensuring we check and prioritise our persistent store to maintain data persistence
 func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string, name string, s *syscall.Stat_t, out *fuse.EntryOut, fdesc *int, flags *uint32) (syscall.Errno, *fs.Inode, *OptiFSFile) {
     
@@ -297,8 +328,8 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
         cerr, customMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
         if cerr != nil {
-            // Assume an empty file
-            log.Println("Must be an empty file")
+            // Must be an empty or special file
+            log.Println("Must be an empty or special file")
             // TODO: Do we need to do anything special here?
         }
 
