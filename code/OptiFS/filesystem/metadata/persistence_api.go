@@ -160,36 +160,6 @@ func RetrieveMetadataMap() error {
 	return nil
 }
 
-// Printing the regularFileMetadataHash for testing purposes
-func PrintRegularFileMetadataHash() {
-	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-	log.Println("PRINTING FILE METADATA HASHMAP")
-	for key, value := range regularFileMetadataHash {
-		log.Printf("Key: %x, Value: %v\n", key, value)
-	}
-	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-}
-
-// Printing the dirMetadataHash for testing purposes
-func PrintDirMetadataHash() {
-	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-	log.Println("PRINTING DIR METADATA HASHMAP")
-	for key, value := range dirMetadataHash {
-		log.Printf("Key: %x, Value: %v\n", key, value)
-	}
-	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-}
-
-// Printing the nodePersistenceHash for testing purposes
-func PrintNodePersistenceHash() {
-	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-	log.Println("PRINTING NODE METADATA HASHMAP")
-	for key, value := range nodePersistenceHash {
-		log.Printf("Key: %x, Value: %v\n", key, value)
-	}
-	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-}
-
 // Function saves the node persistence hash into a Go binary (.gob) file
 // since a hashmap will be deleted when the system is restarted (stored in RAM)
 // we encode the hashmap and store it in a file saved on disk to be loaded when OptiFS starts
@@ -332,4 +302,34 @@ func RetrievePersistantStorage() {
 	RetrieveNodePersistenceHash()
 	RetrieveMetadataMap()
 	RetrieveDirMetadataHash()
+}
+
+// Printing the regularFileMetadataHash for testing purposes
+func PrintRegularFileMetadataHash() {
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	log.Println("PRINTING FILE METADATA HASHMAP")
+	for key, value := range regularFileMetadataHash {
+		log.Printf("Key: %x, Value: %v\n", key, value)
+	}
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+}
+
+// Printing the dirMetadataHash for testing purposes
+func PrintDirMetadataHash() {
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	log.Println("PRINTING DIR METADATA HASHMAP")
+	for key, value := range dirMetadataHash {
+		log.Printf("Key: %x, Value: %v\n", key, value)
+	}
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+}
+
+// Printing the nodePersistenceHash for testing purposes
+func PrintNodePersistenceHash() {
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	log.Println("PRINTING NODE METADATA HASHMAP")
+	for key, value := range nodePersistenceHash {
+		log.Printf("Key: %x, Value: %v\n", key, value)
+	}
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 }
