@@ -12,14 +12,13 @@ import (
 
 // Updates a MapEntryMetadata object with all data provided from the Stat_t object passed
 func FullMapEntryMetadataUpdate(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) error {
-
 	// locks for this function are implemented in the functions being called
 	// done to prevent deadlock
 
 	log.Println("Updating metadata through struct...")
 	log.Printf("unstableAttr: %+v\n", unstableAttr)
 
-    updateAllFromStat(metadata, unstableAttr, stableAttr, path)
+	updateAllFromStat(metadata, unstableAttr, stableAttr, path)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through struct")
@@ -49,12 +48,19 @@ func FillAttr(customMetadata *MapEntryMetadata, out *fuse.Attr) {
 	(*out).Blksize = uint32((*customMetadata).Blksize)
 }
 
-// TODO: Figure out if we are using dirMutex or metadataMutex
-// maybe call a check to see what we're dealing with?
-
 // Function updates the UID and GID of a MapEntryMetadata
 // Accepts pointers, doesn't set nil values
-func UpdateOwner(metadata *MapEntryMetadata, uid, gid *uint32) error {
+func UpdateOwner(metadata *MapEntryMetadata, uid, gid *uint32, isDir bool) error {
+	// we check to see if we are dealing with a directory or not
+	// so we know which lock to instantiate
+	if isDir {
+		dirMutex.Lock()
+		defer dirMutex.Unlock()
+	} else {
+		metadataMutex.Lock()
+		defer metadataMutex.Unlock()
+	}
+
 	if uid != nil {
 		(*metadata).Uid = *uid
 		log.Println("Updated custom UID")
@@ -68,7 +74,17 @@ func UpdateOwner(metadata *MapEntryMetadata, uid, gid *uint32) error {
 
 // Function updates the time data of a MapEntryMetadata
 // Accepts pointers, doesn't set nil values
-func UpdateTime(metadata *MapEntryMetadata, atim, mtim, ctim *syscall.Timespec) error {
+func UpdateTime(metadata *MapEntryMetadata, atim, mtim, ctim *syscall.Timespec, isDir bool) error {
+	// we check to see if we are dealing with a directory or not
+	// so we know which lock to instantiate
+	if isDir {
+		dirMutex.Lock()
+		defer dirMutex.Unlock()
+	} else {
+		metadataMutex.Lock()
+		defer metadataMutex.Unlock()
+	}
+
 	if atim != nil {
 		(*metadata).Atim = *atim
 		log.Println("Updated custom ATime")
@@ -86,7 +102,17 @@ func UpdateTime(metadata *MapEntryMetadata, atim, mtim, ctim *syscall.Timespec) 
 
 // Function updates inode and device fields of a MapEntryMetadata
 // Accepts pointers, doesn't set nil values
-func UpdateLocation(metadata *MapEntryMetadata, inode, dev *uint64) error {
+func UpdateLocation(metadata *MapEntryMetadata, inode, dev *uint64, isDir bool) error {
+	// we check to see if we are dealing with a directory or not
+	// so we know which lock to instantiate
+	if isDir {
+		dirMutex.Lock()
+		defer dirMutex.Unlock()
+	} else {
+		metadataMutex.Lock()
+		defer metadataMutex.Unlock()
+	}
+
 	if inode != nil {
 		(*metadata).Ino = *inode
 		log.Println("Updated custom Inode")
@@ -100,7 +126,17 @@ func UpdateLocation(metadata *MapEntryMetadata, inode, dev *uint64) error {
 
 // Function updates size field of a MapEntryMetadata
 // Accepts pointers, doesn't set nil values
-func UpdateSize(metadata *MapEntryMetadata, size *int64) error {
+func UpdateSize(metadata *MapEntryMetadata, size *int64, isDir bool) error {
+	// we check to see if we are dealing with a directory or not
+	// so we know which lock to instantiate
+	if isDir {
+		dirMutex.Lock()
+		defer dirMutex.Unlock()
+	} else {
+		metadataMutex.Lock()
+		defer metadataMutex.Unlock()
+	}
+
 	if size != nil {
 		(*metadata).Size = *size
 		log.Println("Updated custom Size")
@@ -110,7 +146,17 @@ func UpdateSize(metadata *MapEntryMetadata, size *int64) error {
 
 // Function updates link count of a MapEntryMetadata
 // Accepts pointers, doesn't set nil values
-func UpdateLinkCount(metadata *MapEntryMetadata, linkCount *uint64) error {
+func UpdateLinkCount(metadata *MapEntryMetadata, linkCount *uint64, isDir bool) error {
+	// we check to see if we are dealing with a directory or not
+	// so we know which lock to instantiate
+	if isDir {
+		dirMutex.Lock()
+		defer dirMutex.Unlock()
+	} else {
+		metadataMutex.Lock()
+		defer metadataMutex.Unlock()
+	}
+
 	if linkCount != nil {
 		(*metadata).Nlink = *linkCount
 		log.Println("Updated custom Nlink")
@@ -120,7 +166,17 @@ func UpdateLinkCount(metadata *MapEntryMetadata, linkCount *uint64) error {
 
 // Function updates mode of a MapEntryMetadata
 // Accepts pointers, doesn't set nil values
-func UpdateMode(metadata *MapEntryMetadata, mode *uint32) error {
+func UpdateMode(metadata *MapEntryMetadata, mode *uint32, isDir bool) error {
+	// we check to see if we are dealing with a directory or not
+	// so we know which lock to instantiate
+	if isDir {
+		dirMutex.Lock()
+		defer dirMutex.Unlock()
+	} else {
+		metadataMutex.Lock()
+		defer metadataMutex.Unlock()
+	}
+
 	if mode != nil {
 		(*metadata).Mode = *mode
 		log.Println("Updated custom Mode")
@@ -130,7 +186,17 @@ func UpdateMode(metadata *MapEntryMetadata, mode *uint32) error {
 
 // Function update C++ struct padding optimisation variables - not sure if they're used or needed
 // Accepts pointers, doesn't set nil values
-func UpdateWeirdCPPStuff(metadata *MapEntryMetadata, X__pad0 *int32, X__unused *[3]int64) error {
+func UpdateWeirdCPPStuff(metadata *MapEntryMetadata, X__pad0 *int32, X__unused *[3]int64, isDir bool) error {
+	// we check to see if we are dealing with a directory or not
+	// so we know which lock to instantiate
+	if isDir {
+		dirMutex.Lock()
+		defer dirMutex.Unlock()
+	} else {
+		metadataMutex.Lock()
+		defer metadataMutex.Unlock()
+	}
+
 	if X__pad0 != nil {
 		(*metadata).X__pad0 = *X__pad0
 		log.Println("Updated custom X__pad0")

@@ -75,14 +75,14 @@ func RetrieveNodeInfo(path string) (error, *fs.StableAttr, uint32, bool, [64]byt
 	nodeMutex.RLock()
 	defer nodeMutex.RUnlock()
 
-    log.Printf("Searching for {%v} in {%+v}\n", path, nodePersistenceHash)
+	log.Printf("Searching for {%v} in {%+v}\n", path, nodePersistenceHash)
 
 	info, ok := nodePersistenceHash[path]
 	if !ok {
-        log.Println("Failed to retrieve node!")
+		log.Println("Failed to retrieve node!")
 		return errors.New("No node info available for path"), &fs.StableAttr{}, 0, false, [64]byte{}, 0
 	}
-    log.Println("Retrieved node!")
+	log.Println("Retrieved node!")
 	return nil, &info.stableAttr, info.mode, info.isDir, info.contentHash, info.refNum
 }
 
@@ -158,14 +158,6 @@ func RetrieveMetadataMap() error {
 	}
 
 	return nil
-}
-
-// Printing the regularFileMetadataHash for testing purposes
-func PrintRegularFileMetadataHash() {
-	log.Println("PRINTING METADATA HASHMAP")
-	for key, value := range regularFileMetadataHash {
-		log.Printf("Key: %x, Value: %v\n", key, value)
-	}
 }
 
 // Function saves the node persistence hash into a Go binary (.gob) file
@@ -310,4 +302,34 @@ func RetrievePersistantStorage() {
 	RetrieveNodePersistenceHash()
 	RetrieveMetadataMap()
 	RetrieveDirMetadataHash()
+}
+
+// Printing the regularFileMetadataHash for testing purposes
+func PrintRegularFileMetadataHash() {
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	log.Println("PRINTING FILE METADATA HASHMAP")
+	for key, value := range regularFileMetadataHash {
+		log.Printf("Key: %x, Value: %v\n", key, value)
+	}
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+}
+
+// Printing the dirMetadataHash for testing purposes
+func PrintDirMetadataHash() {
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	log.Println("PRINTING DIR METADATA HASHMAP")
+	for key, value := range dirMetadataHash {
+		log.Printf("Key: %x, Value: %v\n", key, value)
+	}
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+}
+
+// Printing the nodePersistenceHash for testing purposes
+func PrintNodePersistenceHash() {
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	log.Println("PRINTING NODE METADATA HASHMAP")
+	for key, value := range nodePersistenceHash {
+		log.Printf("Key: %x, Value: %v\n", key, value)
+	}
+	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 }
