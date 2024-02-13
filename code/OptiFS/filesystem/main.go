@@ -21,7 +21,7 @@ func main() {
 	log.Println("Starting OptiFS")
 	log.SetFlags(log.Lmicroseconds)
 	debug := flag.Bool("debug", false, "enter debug mode")
-    	rmpersist := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
+	rmpersist := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
 
 	flag.Parse() // parse arguments
 	if flag.NArg() < 2 {
@@ -82,14 +82,15 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
-    if !(*rmpersist) {
-        metadata.RetrievePersistantStorage() // retrieve the hashmaps
-	// print for debugging purposes
-	metadata.PrintRegularFileMetadataHash()
-	metadata.PrintDirMetadataHash()
-	metadata.PrintNodePersistenceHash()
-	permissions.PrintSysadminInfo()
-    }
+	if !(*rmpersist) {
+		metadata.RetrievePersistantStorage() // retrieve the hashmaps
+		permissions.RetrieveSysadmin()
+		// print for debugging purposes
+		metadata.PrintRegularFileMetadataHash()
+		metadata.PrintDirMetadataHash()
+		metadata.PrintNodePersistenceHash()
+		permissions.PrintSysadminInfo()
+	}
 
 	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
@@ -98,16 +99,16 @@ func main() {
 	log.Println("=========================================================")
 	// when we are shutting down the filesystem, save the hashmaps
 
-    if !(*rmpersist) {
-        defer func() {
-            metadata.SavePersistantStorage()
-	    permissions.SaveSysadmin()
-            // print for debugging purposes
-            metadata.PrintRegularFileMetadataHash()
-            metadata.PrintDirMetadataHash()
-            metadata.PrintNodePersistenceHash()
-        }()
-    }
+	if !(*rmpersist) {
+		defer func() {
+			metadata.SavePersistantStorage()
+			permissions.SaveSysadmin()
+			// print for debugging purposes
+			metadata.PrintRegularFileMetadataHash()
+			metadata.PrintDirMetadataHash()
+			metadata.PrintNodePersistenceHash()
+		}()
+	}
 
 	server.Wait()
 }
