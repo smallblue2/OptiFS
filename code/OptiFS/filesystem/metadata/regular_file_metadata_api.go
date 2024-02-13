@@ -37,21 +37,26 @@ func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
 // Gets the most recent entry in a MapEntry
 // Returns nil if there is no entry
 func RetrieveRecent(entry *MapEntry) *MapEntryMetadata {
-    indx := entry.IndexCounter
-    // If it's empty, return nothing
-    if indx == 0 {
-        return nil
-    }
-    for indx := entry.IndexCounter; indx >= 0; indx-- {
-        meta, ok := entry.EntryList[indx]
-        if ok {
-            log.Printf("Found metadata at {%v}\n", indx)
-            return meta
-        }
-        log.Printf("Nothing at {%v}\n", indx)
-    }
-    log.Println("Couldn't find an entry!")
-    return nil
+	// needs a read lock as data is not being modified, only read, so multiple
+	// operations can read at the same time (concurrently)
+	metadataMutex.RLock()
+	defer metadataMutex.RUnlock()
+
+	indx := entry.IndexCounter
+	// If it's empty, return nothing
+	if indx == 0 {
+		return nil
+	}
+	for indx := entry.IndexCounter; indx >= 0; indx-- {
+		meta, ok := entry.EntryList[indx]
+		if ok {
+			log.Printf("Found metadata at {%v}\n", indx)
+			return meta
+		}
+		log.Printf("Nothing at {%v}\n", indx)
+	}
+	log.Println("Couldn't find an entry!")
+	return nil
 }
 
 // Retrieves regular file metadata for a hash and refnum provided. Returns an error if it cannot be found
@@ -110,22 +115,21 @@ func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
 	}
 	log.Println("Found an entry!")
 
-
 	metadataMutex.Lock()
 	// Delete the metadata from our entry
 	delete(entry.EntryList, refNum)
 	// Reflect these changes in the MapEntry
 	entry.ReferenceCount--
-    metadataMutex.Unlock()
+	metadataMutex.Unlock()
 
 	log.Println("Deleted metadata, checking to see if we need to delete the MapEntry")
 
 	// Check to see if the MapEntry is empty
 	if entry.ReferenceCount == 0 {
 		// If it is, delete the whole entry
-        metadataMutex.Lock()
+		metadataMutex.Lock()
 		delete(regularFileMetadataHash, contentHash)
-        metadataMutex.Unlock()
+		metadataMutex.Unlock()
 		log.Println("Deleted MapEntry")
 	}
 	log.Println("Finished removing metadata")
@@ -212,7 +216,7 @@ func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstable
 
 	// Now we can be sure the entry exists, let's update it
 	// this function also already has locks!
-    updateAllFromStat(metadata, unstableAttr, stableAttr, path)
+	updateAllFromStat(metadata, unstableAttr, stableAttr, path)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through lookup")
@@ -229,7 +233,7 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
 	log.Println("Migrating old metadata across to new entry.")
 
 	// Old attributes to carry across
-    (*newMeta).Path = (*oldMeta).Path
+	(*newMeta).Path = (*oldMeta).Path
 	(*newMeta).Mode = (*oldMeta).Mode
 	(*newMeta).Ctim = (*oldMeta).Ctim
 	(*newMeta).Uid = (*oldMeta).Uid
@@ -253,61 +257,66 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
 
 // Handle the passover or metadata in a duplicate scenario, where the underlying node is a hardlink, but we don't want it to appear as so
 func MigrateDuplicateFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMetadata, unstableAttr *syscall.Stat_t) error {
+	// needs a write lock as we are modifying the metadata
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
-    log.Println("Migrating old metadata across to new entry for duplicate file")
+	log.Println("Migrating old metadata across to new entry for duplicate file")
 
-
-    // Old attributes to carry across
-    (*newMeta).Path = (*oldMeta).Path
-    (*newMeta).Mode = (*oldMeta).Mode
-    (*newMeta).Ctim = (*oldMeta).Ctim
-    (*newMeta).Uid = (*oldMeta).Uid
-    (*newMeta).Gid = (*oldMeta).Gid
-    (*newMeta).Dev = (*oldMeta).Dev
-    (*newMeta).Atim = (*oldMeta).Atim
-    (*newMeta).Rdev = (*oldMeta).Rdev
+	// Old attributes to carry across
+	(*newMeta).Path = (*oldMeta).Path
+	(*newMeta).Mode = (*oldMeta).Mode
+	(*newMeta).Ctim = (*oldMeta).Ctim
+	(*newMeta).Uid = (*oldMeta).Uid
+	(*newMeta).Gid = (*oldMeta).Gid
+	(*newMeta).Dev = (*oldMeta).Dev
+	(*newMeta).Atim = (*oldMeta).Atim
+	(*newMeta).Rdev = (*oldMeta).Rdev
 	(*newMeta).Nlink = (*oldMeta).Nlink
 	(*newMeta).X__pad0 = (*oldMeta).X__pad0
 	(*newMeta).X__unused = (*oldMeta).X__unused
 
-    // Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
+	// Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
 	(*newMeta).Size = (*unstableAttr).Size
 	(*newMeta).Blksize = (*unstableAttr).Blksize
 	(*newMeta).Blocks = (*unstableAttr).Blocks
 
-    return nil
+	return nil
 
 }
 
 // Handle the creation of a metadata entry for a new duplicate file with no previous metadata entry
 func InitialiseNewDuplicateFileMetadata(ctx context.Context, newMeta *MapEntryMetadata, spareUnstableAttr *syscall.Stat_t, linkUnstableAttr *syscall.Stat_t, path string) error {
+	// needs a write lock as we are modifying the metadata
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
-    caller, check := fuse.FromContext(ctx)
-    if !check {
-        log.Println("No caller info available")
-        return errors.New("No caller info available")
-    }
-    uid, gid := uint32(caller.Uid), uint32(caller.Gid)
+	caller, check := fuse.FromContext(ctx)
+	if !check {
+		log.Println("No caller info available")
+		return errors.New("No caller info available")
+	}
+	uid, gid := uint32(caller.Uid), uint32(caller.Gid)
 
-    // Old attributes to carry across
-    (*newMeta).Path = path
-    (*newMeta).Mode = (*spareUnstableAttr).Mode
-    (*newMeta).Ctim = (*spareUnstableAttr).Ctim
-    (*newMeta).Uid = uid
-    (*newMeta).Gid = gid
-    (*newMeta).Dev = (*spareUnstableAttr).Dev
-    (*newMeta).Atim = (*spareUnstableAttr).Atim
-    (*newMeta).Rdev = (*spareUnstableAttr).Rdev
+	// Old attributes to carry across
+	(*newMeta).Path = path
+	(*newMeta).Mode = (*spareUnstableAttr).Mode
+	(*newMeta).Ctim = (*spareUnstableAttr).Ctim
+	(*newMeta).Uid = uid
+	(*newMeta).Gid = gid
+	(*newMeta).Dev = (*spareUnstableAttr).Dev
+	(*newMeta).Atim = (*spareUnstableAttr).Atim
+	(*newMeta).Rdev = (*spareUnstableAttr).Rdev
 	(*newMeta).Nlink = (*spareUnstableAttr).Nlink
 	(*newMeta).X__pad0 = (*spareUnstableAttr).X__pad0
 	(*newMeta).X__unused = (*spareUnstableAttr).X__unused
 
-    // Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
+	// Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
 	(*newMeta).Size = (*linkUnstableAttr).Size
 	(*newMeta).Blksize = (*linkUnstableAttr).Blksize
 	(*newMeta).Blocks = (*linkUnstableAttr).Blocks
 
-    return nil
+	return nil
 }
 
 // Creates a new MapEntry in the main hash map when provided with a contentHash
