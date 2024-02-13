@@ -295,6 +295,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 	var existingHash [64]byte
 	var existingRef uint64
+    var isDir bool
 
 	// Search for persistent hash or ref's
 	log.Println("Searching for persistently stored hash and ref")
@@ -304,6 +305,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		log.Printf("Found - {%v} - {%+v}\n", existingHash, existingRef)
 	} else {
 		log.Println("No persistent regfile data found!")
+        isDir = true
 	}
 
 	// Check to see if we can find an entry in our node hashmap
@@ -311,23 +313,23 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 	if err1 == nil {
 		log.Println("Setting attributes for custom regular file metadata.")
 		if f != nil {
-			return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, f.(*OptiFSFile), out))
+			return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, f.(*OptiFSFile), out, isDir))
 		}
-		return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, nil, out))
+		return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, nil, out, isDir))
 	}
 	// Also check to see if we can find an entry in our directory hashmap
 	err2, dirMetadata := metadata.LookupDirMetadata(n.RPath())
 	if err2 == nil {
 		log.Println("Setting attributes for custom directory metadata.")
 		if f != nil {
-			return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, f.(*OptiFSFile), out))
+			return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, f.(*OptiFSFile), out, isDir))
 		}
-		return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, nil, out))
+		return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, nil, out, isDir))
 	}
 
 	// Otherwise, neither exists; just do underlying node
 	log.Println("Setting attributes for underlying node.")
-	return fs.ToErrno(SetAttributes(ctx, nil, in, n, nil, out))
+	return fs.ToErrno(SetAttributes(ctx, nil, in, n, nil, out, isDir))
 }
 
 // Opens a file for reading, and returns a filehandle

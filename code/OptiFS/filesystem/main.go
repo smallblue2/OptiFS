@@ -1,12 +1,13 @@
 package main
 
 import (
+	"filesystem/metadata"
+	"filesystem/vfs"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path"
-    "filesystem/vfs"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
@@ -46,18 +47,17 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
-	//hashing.RetrieveMap() // retrieve the hashmap
+	metadata.RetrievePersistantStorage() // retrieve the hashmaps
 
 	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
 	log.Printf("DEBUG: %v", options.Debug)
 	log.Println("=========================================================")
 
-	// when we are shutting down the filesystem, save the hashmap
-	//defer func() {
-    //    hashing.PrintMap()
-    //    hashing.SaveMap(hashing.FileHashes)
-	//}()
+	// when we are shutting down the filesystem, save the hashmaps
+	defer func() {
+		metadata.SavePersistantStorage()
+	}()
 
 	server.Wait()
 }

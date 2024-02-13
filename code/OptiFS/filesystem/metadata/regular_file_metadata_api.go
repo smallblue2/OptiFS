@@ -16,12 +16,17 @@ import (
 //
 // Returns a bool for whether the contentHash can be found and also returns the underlying Inode
 func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
+	// needs a read lock as data is not being modified, only read, so multiple
+	// operations can read at the same time (concurrently)
+	metadataMutex.RLock()
+	defer metadataMutex.RUnlock()
+
 	// Check to see if there's an entry for the contentHash and refNum above
 	entry, exists := regularFileMetadataHash[contentHash]
 	// If it doesn't exist
 	if !exists {
 		log.Println("Content is unique!")
-        return !exists, 0 // TODO: return the underlying node OR get rid of it
+		return !exists, 0 // TODO: return the underlying node OR get rid of it
 	}
 
 	// If it exists, return the underlying Inode
@@ -51,6 +56,10 @@ func RetrieveRecent(entry *MapEntry) *MapEntryMetadata {
 
 // Retrieves regular file metadata for a hash and refnum provided. Returns an error if it cannot be found
 func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *MapEntryMetadata) {
+	// needs a read lock as data is not being modified, only read, so multiple
+	// operations can read at the same time (concurrently)
+	metadataMutex.RLock()
+	defer metadataMutex.RUnlock()
 
 	log.Println("Looking up a contentHash and refNum...")
 
@@ -75,18 +84,22 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *Map
 //
 // Returns the retrived MapEntry, or an error if it doesn't exist
 func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
-    entry, ok := regularFileMetadataHash[contentHash]
-    if !ok {
-        return errors.New("Entry doesn't exist!"), nil
-    }
+	// needs a read lock as data is not being modified, only read, so multiple
+	// operations can read at the same time (concurrently)
+	metadataMutex.RLock()
+	defer metadataMutex.RUnlock()
 
-    return nil, entry
+	entry, ok := regularFileMetadataHash[contentHash]
+	if !ok {
+		return errors.New("Entry doesn't exist!"), nil
+	}
+
+	return nil, entry
 }
 
-// Removes a MapEntryMetadata instance in regularFileMetadataHash based on content hash and refnum provided. 
+// Removes a MapEntryMetadata instance in regularFileMetadataHash based on content hash and refnum provided.
 // Also handles if this potentially creates an empty MapEntry struct.
 func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
-
 	log.Printf("Removing Metadata for refNum{%v}, contentHash{%+v}\n", refNum, contentHash)
 
 	// Check to see if an entry exists
@@ -97,17 +110,22 @@ func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
 	}
 	log.Println("Found an entry!")
 
+
+	metadataMutex.Lock()
 	// Delete the metadata from our entry
 	delete(entry.EntryList, refNum)
 	// Reflect these changes in the MapEntry
 	entry.ReferenceCount--
+    metadataMutex.Unlock()
 
 	log.Println("Deleted metadata, checking to see if we need to delete the MapEntry")
 
 	// Check to see if the MapEntry is empty
 	if entry.ReferenceCount == 0 {
 		// If it is, delete the whole entry
+        metadataMutex.Lock()
 		delete(regularFileMetadataHash, contentHash)
+        metadataMutex.Unlock()
 		log.Println("Deleted MapEntry")
 	}
 	log.Println("Finished removing metadata")
@@ -117,6 +135,10 @@ func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
 
 // Retrieves the MapEntry struct from which the Metadata entry struct that the refNum and contentHash links to
 func RetrieveRegularFileMapEntryFromHashAndRef(contentHash [64]byte, refNum uint64) (error, *MapEntry) {
+	// needs a read lock as data is not being modified, only read, so multiple
+	// operations can read at the same time (concurrently)
+	metadataMutex.RLock()
+	defer metadataMutex.RUnlock()
 
 	log.Println("Looking up MapEntry from Hash and Ref")
 
@@ -151,6 +173,11 @@ func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, 
 		return errors.New("Default values detected"), &MapEntry{}, &MapEntryMetadata{}
 	}
 
+	// needs a read lock as data is not being modified, only read, so multiple
+	// operations can read at the same time (concurrently)
+	metadataMutex.RLock()
+	defer metadataMutex.RUnlock()
+
 	// Now actually query the hashmap
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
 		if metadataEntry, ok := contentEntry.EntryList[refNum]; ok {
@@ -168,6 +195,8 @@ func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, 
 // If refNum or contentHash is invalid, it returns an error
 func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) error {
 
+	// locks for this function are implemented in the functions being called
+	// done to prevent deadlock
 	log.Println("Updating metadata through lookup...")
 	// Ensure that contentHash and refNum is valid
 	err, metadata := LookupRegularFileMetadata(contentHash, refNum)
@@ -190,8 +219,11 @@ func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstable
 
 // Moves old metadata to a new node being created
 func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMetadata, unstableAttr *syscall.Stat_t) error {
+	// needs a write lock as we are modifying the metadata
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
-    log.Println("Migrating old metadata across to new entry.")
+	log.Println("Migrating old metadata across to new entry.")
 
 	// Old attributes to carry across
     (*newMeta).Path = (*oldMeta).Path
@@ -278,10 +310,18 @@ func InitialiseNewDuplicateFileMetadata(ctx context.Context, newMeta *MapEntryMe
 // Creates a new MapEntry in the main hash map when provided with a contentHash
 // If the MapEntry already exists, we will simply pass back the already created MapEntry
 func CreateRegularFileMapEntry(contentHash [64]byte) *MapEntry {
+	// read lock for reading the hashmap
+	metadataMutex.RLock()
 	if entry, ok := regularFileMetadataHash[contentHash]; ok {
+		metadataMutex.RUnlock() // unlock the process
 		log.Println("MapEntry already exists, returning it")
 		return entry
 	}
+	metadataMutex.RUnlock() // unlock the process
+
+	// now we lock for writing, as we are creating a new entry
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	log.Println("Creating a new MapEntry")
 	// Create the entry - it doesn't exist
@@ -304,6 +344,9 @@ func CreateRegularFileMapEntry(contentHash [64]byte) *MapEntry {
 // Create a new createMapEntryMetadata struct (with default values) in the provided MapEntry.
 // Returns the new createMapEntryMetadata along with the refNum to it.
 func CreateRegularFileMetadata(entry *MapEntry) (refNum uint64, newEntry *MapEntryMetadata) {
+	// lock for writing, as we are creating a new entry
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	log.Println("Creating a new MapEntryMetadata")
 

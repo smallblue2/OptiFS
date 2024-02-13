@@ -17,7 +17,7 @@ import (
 // Sets the attributes of the provided MapEntryMetadata struct.
 //
 // Assumes either an OptiFSNode input, or an OptiFSFile input.
-func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn, n *OptiFSNode, f *OptiFSFile, out *fuse.AttrOut) syscall.Errno {
+func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn, n *OptiFSNode, f *OptiFSFile, out *fuse.AttrOut, isDir bool) syscall.Errno {
 
 	// If we need to - Manually change the underlying attributes ourselves
     var isOwner bool
