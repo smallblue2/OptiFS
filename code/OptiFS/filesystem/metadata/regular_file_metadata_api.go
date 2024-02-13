@@ -135,10 +135,6 @@ func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
 
 // Retrieves the MapEntry struct from which the Metadata entry struct that the refNum and contentHash links to
 func RetrieveRegularFileMapEntryFromHashAndRef(contentHash [64]byte, refNum uint64) (error, *MapEntry) {
-	// needs a read lock as data is not being modified, only read, so multiple
-	// operations can read at the same time (concurrently)
-	metadataMutex.RLock()
-	defer metadataMutex.RUnlock()
 
 	log.Println("Looking up MapEntry from Hash and Ref")
 
@@ -148,6 +144,11 @@ func RetrieveRegularFileMapEntryFromHashAndRef(contentHash [64]byte, refNum uint
 		log.Println("Default values detected, no MapEntry available")
 		return errors.New("Default values detected"), &MapEntry{}
 	}
+
+	// needs a read lock as data is not being modified, only read, so multiple
+	// operations can read at the same time (concurrently)
+	metadataMutex.RLock()
+	defer metadataMutex.RUnlock()
 
 	// Now actually query the hashmap
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
@@ -199,6 +200,7 @@ func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstable
 	// done to prevent deadlock
 	log.Println("Updating metadata through lookup...")
 	// Ensure that contentHash and refNum is valid
+	// this function already has locks!
 	err, metadata := LookupRegularFileMetadata(contentHash, refNum)
 	if err != nil {
 		log.Println("Couldn't find the metadata struct")
@@ -209,6 +211,7 @@ func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstable
 	log.Printf("unstableAttr: %+v\n", unstableAttr)
 
 	// Now we can be sure the entry exists, let's update it
+	// this function also already has locks!
     updateAllFromStat(metadata, unstableAttr, stableAttr, path)
 
 	log.Printf("metadata: %+v\n", metadata)

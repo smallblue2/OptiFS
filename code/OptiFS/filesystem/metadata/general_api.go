@@ -13,6 +13,9 @@ import (
 // Updates a MapEntryMetadata object with all data provided from the Stat_t object passed
 func FullMapEntryMetadataUpdate(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) error {
 
+	// locks for this function are implemented in the functions being called
+	// done to prevent deadlock
+
 	log.Println("Updating metadata through struct...")
 	log.Printf("unstableAttr: %+v\n", unstableAttr)
 
@@ -25,6 +28,10 @@ func FullMapEntryMetadataUpdate(metadata *MapEntryMetadata, unstableAttr *syscal
 }
 
 func FillAttr(customMetadata *MapEntryMetadata, out *fuse.Attr) {
+	// needs a write lock as we are modifying the metadata
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
+
 	(*out).Ino = (*customMetadata).Ino
 	(*out).Size = uint64((*customMetadata).Size)
 	(*out).Blocks = uint64((*customMetadata).Blocks)
@@ -42,6 +49,8 @@ func FillAttr(customMetadata *MapEntryMetadata, out *fuse.Attr) {
 	(*out).Blksize = uint32((*customMetadata).Blksize)
 }
 
+// TODO: Figure out if we are using dirMutex or metadataMutex
+// maybe call a check to see what we're dealing with?
 
 // Function updates the UID and GID of a MapEntryMetadata
 // Accepts pointers, doesn't set nil values
@@ -136,6 +145,9 @@ func UpdateWeirdCPPStuff(metadata *MapEntryMetadata, X__pad0 *int32, X__unused *
 // Function fills the FUSE AttrOut struct with the metadata contained in the provided MapEntryMetadata
 // struct.
 func FillAttrOut(metadata *MapEntryMetadata, out *fuse.AttrOut) {
+	// needs a write lock as we are modifying the metadata
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	log.Printf("metadata: %+v\n", metadata)
 
