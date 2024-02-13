@@ -45,9 +45,9 @@ type MapEntryMetadata struct {
 
 // NodeInfo is used to store data required to keep our nodes persistent between OptiFS instances
 type NodeInfo struct {
-    stableAttr fs.StableAttr
-    mode uint32
-    isDir bool
+	stableAttr  fs.StableAttr
+	mode        uint32
+	isDir       bool
 	contentHash [64]byte
 	refNum      uint64
 }

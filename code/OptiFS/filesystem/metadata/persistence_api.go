@@ -12,20 +12,34 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 )
 
-var nodeMutex sync.Mutex // lock for hashmap saving node info
+var nodeMutex sync.RWMutex     // lock for hashmap saving node info
+var metadataMutex sync.RWMutex // lock for hashmap saving custom metadata
+var dirMutex sync.RWMutex      // lock for hashmap saving directory infor
 
 // Stores the content hash and reference number for keeping a node persistent between OptiFS instances
 func StoreRegFileInfo(path string, stableAttr *fs.StableAttr, mode uint32, contentHash [64]byte, refNum uint64) {
+	// needs a write lock as we are modifying the hashmap
+	nodeMutex.Lock()
+	defer nodeMutex.Unlock()
+
 	nodePersistenceHash[path] = &NodeInfo{stableAttr: *stableAttr, mode: mode, isDir: false, contentHash: contentHash, refNum: refNum}
 }
 
 // Specifically stores a directory into the persistence hash
 func StoreDirInfo(path string, stableAttr *fs.StableAttr, mode uint32) {
+	// needs a write lock as we are modifying the hashmap
+	nodeMutex.Lock()
+	defer nodeMutex.Unlock()
+
 	nodePersistenceHash[path] = &NodeInfo{stableAttr: *stableAttr, mode: mode, isDir: true}
 }
 
 // Updates node info in the persistence hash, all values except the path are optional and won't be updated if nil
 func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *uint32, contentHash *[64]byte, refNum *uint64) {
+	// needs a write lock as we are modifying the hashmap
+	nodeMutex.Lock()
+	defer nodeMutex.Unlock()
+
 	log.Printf("Updating {%v}'s Persistent Data", path)
 	store, ok := nodePersistenceHash[path]
 	if !ok {
@@ -56,6 +70,11 @@ func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *u
 
 // Retrieves the content hash and reference number of a node in the nodePersistenceHash
 func RetrieveNodeInfo(path string) (error, *fs.StableAttr, uint32, bool, [64]byte, uint64) {
+	// needs a read lock as data is not being modified, only read, so multiple
+	// operations can read at the same time (concurrently)
+	nodeMutex.RLock()
+	defer nodeMutex.RUnlock()
+
 	info, ok := nodePersistenceHash[path]
 	if !ok {
 		return errors.New("No node info available for path"), &fs.StableAttr{}, 0, false, [64]byte{}, 0
@@ -66,6 +85,10 @@ func RetrieveNodeInfo(path string) (error, *fs.StableAttr, uint32, bool, [64]byt
 
 // Removes an entry from the nodePersistenceHash
 func RemoveNodeInfo(path string) error {
+	// needs a write lock as we are modifying the hashmap
+	nodeMutex.Lock()
+	defer nodeMutex.Unlock()
+
 	delete(nodePersistenceHash, path)
 	return nil
 }
@@ -76,8 +99,8 @@ func RemoveNodeInfo(path string) error {
 func SaveMetadataMap(hashmap map[[64]byte]*MapEntry) error {
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited
-	nodeMutex.Lock()
-	defer nodeMutex.Unlock()
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	log.Println("SAVING METADATA HASHMAP")
 	dest := "hashing/OptiFSRegularFileMetadataSave.gob"
@@ -109,8 +132,8 @@ func SaveMetadataMap(hashmap map[[64]byte]*MapEntry) error {
 func RetrieveMetadataMap() error {
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited
-	nodeMutex.Lock()
-	defer nodeMutex.Unlock()
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	log.Println("RETRIEVING METADATA HASHMAP")
 	dest := "hashing/OptiFSRegularFileMetadataSave.gob"
@@ -210,8 +233,8 @@ func RetrieveNodePersistenceHash() error {
 func SaveDirMetadataHash(hashmap map[string]*MapEntryMetadata) error {
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited
-	nodeMutex.Lock()
-	defer nodeMutex.Unlock()
+	dirMutex.Lock()
+	defer dirMutex.Unlock()
 
 	log.Println("SAVING DIR HASHMAP")
 	dest := "hashing/OptiFSDirMetadataSave.gob"
@@ -244,8 +267,8 @@ func SaveDirMetadataHash(hashmap map[string]*MapEntryMetadata) error {
 func RetrieveDirMetadataHash() error {
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited
-	nodeMutex.Lock()
-	defer nodeMutex.Unlock()
+	dirMutex.Lock()
+	defer dirMutex.Unlock()
 
 	log.Println("RETRIEVING DIR HASHMAP")
 	dest := "hashing/OptiFSDirMetadataSave.gob"
