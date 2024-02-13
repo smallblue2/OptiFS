@@ -16,6 +16,7 @@ func main() {
 	log.Println("Starting OptiFS")
 	log.SetFlags(log.Lmicroseconds)
 	debug := flag.Bool("debug", false, "enter debug mode")
+    rmpersist := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
 
 	flag.Parse() // parse arguments
 	if flag.NArg() < 2 {
@@ -47,25 +48,30 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
-	metadata.RetrievePersistantStorage() // retrieve the hashmaps
-	// print for debugging purposes
-	metadata.PrintRegularFileMetadataHash()
-	metadata.PrintDirMetadataHash()
-	metadata.PrintNodePersistenceHash()
+    if !(*rmpersist) {
+        metadata.RetrievePersistantStorage() // retrieve the hashmaps
+        // print for debugging purposes
+        metadata.PrintRegularFileMetadataHash()
+        metadata.PrintDirMetadataHash()
+        metadata.PrintNodePersistenceHash()
+    }
 
 	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
 	log.Printf("DEBUG: %v", options.Debug)
+	log.Printf("RMPERSIST: %v", *rmpersist)
 	log.Println("=========================================================")
 
 	// when we are shutting down the filesystem, save the hashmaps
-	defer func() {
-		metadata.SavePersistantStorage()
-		// print for debugging purposes
-		metadata.PrintRegularFileMetadataHash()
-		metadata.PrintDirMetadataHash()
-		metadata.PrintNodePersistenceHash()
-	}()
+    if !(*rmpersist) {
+        defer func() {
+            metadata.SavePersistantStorage()
+            // print for debugging purposes
+            metadata.PrintRegularFileMetadataHash()
+            metadata.PrintDirMetadataHash()
+            metadata.PrintNodePersistenceHash()
+        }()
+    }
 
 	server.Wait()
 }
