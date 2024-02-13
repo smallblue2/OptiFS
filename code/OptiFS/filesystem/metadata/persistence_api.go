@@ -22,7 +22,7 @@ func StoreRegFileInfo(path string, stableAttr *fs.StableAttr, mode uint32, conte
 	nodeMutex.Lock()
 	defer nodeMutex.Unlock()
 
-	nodePersistenceHash[path] = &NodeInfo{stableAttr: *stableAttr, mode: mode, isDir: false, contentHash: contentHash, refNum: refNum}
+	nodePersistenceHash[path] = &NodeInfo{StableGen: stableAttr.Gen, StableIno: stableAttr.Ino, StableMode: stableAttr.Mode, Mode: mode, IsDir: false, ContentHash: contentHash, RefNum: refNum}
 }
 
 // Specifically stores a directory into the persistence hash
@@ -31,7 +31,7 @@ func StoreDirInfo(path string, stableAttr *fs.StableAttr, mode uint32) {
 	nodeMutex.Lock()
 	defer nodeMutex.Unlock()
 
-	nodePersistenceHash[path] = &NodeInfo{stableAttr: *stableAttr, mode: mode, isDir: true}
+	nodePersistenceHash[path] = &NodeInfo{StableGen: stableAttr.Gen, StableIno: stableAttr.Ino, StableMode: stableAttr.Mode, Mode: mode, IsDir: true}
 }
 
 // Updates node info in the persistence hash, all values except the path are optional and won't be updated if nil
@@ -48,28 +48,30 @@ func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *u
 	}
 	if isDir != nil {
 		log.Println("Setting IsDir")
-		store.isDir = *isDir
+		store.IsDir = *isDir
 	}
 	if stableAttr != nil {
 		log.Println("Setting stableAttr")
-		store.stableAttr = *stableAttr
+        store.StableIno = stableAttr.Ino
+        store.StableGen = stableAttr.Gen
+		store.StableMode = stableAttr.Mode
 	}
 	if mode != nil {
 		log.Println("Setting mode")
-		store.mode = *mode
+		store.Mode = *mode
 	}
 	if contentHash != nil {
 		log.Println("Setting contentHash")
-		store.contentHash = *contentHash
+		store.ContentHash = *contentHash
 	}
 	if refNum != nil {
 		log.Println("Setting refNum")
-		store.refNum = *refNum
+		store.RefNum = *refNum
 	}
 }
 
 // Retrieves the content hash and reference number of a node in the nodePersistenceHash
-func RetrieveNodeInfo(path string) (error, *fs.StableAttr, uint32, bool, [64]byte, uint64) {
+func RetrieveNodeInfo(path string) (error, uint64, uint32, uint64, uint32, bool, [64]byte, uint64) {
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	nodeMutex.RLock()
@@ -80,10 +82,10 @@ func RetrieveNodeInfo(path string) (error, *fs.StableAttr, uint32, bool, [64]byt
 	info, ok := nodePersistenceHash[path]
 	if !ok {
 		log.Println("Failed to retrieve node!")
-		return errors.New("No node info available for path"), &fs.StableAttr{}, 0, false, [64]byte{}, 0
+		return errors.New("No node info available for path"), 0, 0, 0, 0, false, [64]byte{}, 0
 	}
 	log.Println("Retrieved node!")
-	return nil, &info.stableAttr, info.mode, info.isDir, info.contentHash, info.refNum
+	return nil, info.StableIno, info.StableMode, info.StableGen, info.Mode, info.IsDir, info.ContentHash, info.RefNum
 }
 
 // Removes an entry from the nodePersistenceHash
@@ -113,7 +115,7 @@ func SaveMetadataMap(hashmap map[[64]byte]*MapEntry) error {
 	file, err := os.Create(dest)
 
 	if err != nil {
-		log.Println("ERROR WITH FILE - METADATA HASHMAP")
+		log.Printf("ERROR WITH FILE - {%+v} - METADATA HASHMAP\n", err)
 		return err
 	}
 
@@ -123,7 +125,7 @@ func SaveMetadataMap(hashmap map[[64]byte]*MapEntry) error {
 	eErr := encode.Encode(hashmap) // encode the hashmap into binary, put it in the file
 
 	if eErr != nil {
-		log.Println("ERROR WITH ENCODER - METADATA HASHMAP")
+		log.Printf("ERROR WITH ENCODER - {%+v} - METADATA HASHMAP\n", eErr)
 		return eErr
 	}
 
@@ -153,7 +155,7 @@ func RetrieveMetadataMap() error {
 	dErr := decode.Decode(&regularFileMetadataHash) // decode the file back into the hashmap
 
 	if dErr != nil {
-		log.Println("ERROR WITH DECODER - METADATA HASHMAP")
+		log.Printf("ERROR WITH DECODER - {%+v} - METADATA HASHMAP\n", dErr)
 		return dErr
 	}
 
@@ -177,7 +179,7 @@ func SaveNodePersistenceHash(hashmap map[string]*NodeInfo) error {
 	file, err := os.Create(dest)
 
 	if err != nil {
-		log.Println("ERROR WITH FILE - NODE HASHMAP")
+		log.Printf("ERROR WITH FILE - {%+v} - NODE HASHMAP\n", err)
 		return err
 	}
 
@@ -187,9 +189,11 @@ func SaveNodePersistenceHash(hashmap map[string]*NodeInfo) error {
 	eErr := encode.Encode(hashmap) // encode the hashmap into binary, put it in the file
 
 	if eErr != nil {
-		log.Println("ERROR WITH ENCODER - NODE HASHMAP")
+		log.Printf("ERROR WITH ENCODER - {%+v} - NODE HASHMAP\n", eErr)
 		return eErr
 	}
+
+    log.Println("Saved succesfully!")
 
 	return nil
 }
@@ -216,7 +220,7 @@ func RetrieveNodePersistenceHash() error {
 	dErr := decode.Decode(&nodePersistenceHash) // decode the file back into the hashmap
 
 	if dErr != nil {
-		log.Println("ERROR WITH DECODER - NODE HASHMAP")
+		log.Printf("ERROR WITH DECODER - {%+v} - NODE HASHMAP", dErr)
 		return dErr
 	}
 
@@ -239,7 +243,7 @@ func SaveDirMetadataHash(hashmap map[string]*MapEntryMetadata) error {
 	file, err := os.Create(dest)
 
 	if err != nil {
-		log.Println("ERROR WITH FILE - DIR HASHMAP")
+		log.Printf("ERROR WITH FILE - {%+v} - DIR HASHMAP\n", err)
 		return err
 	}
 
@@ -249,7 +253,7 @@ func SaveDirMetadataHash(hashmap map[string]*MapEntryMetadata) error {
 	eErr := encode.Encode(hashmap) // encode the hashmap into binary, put it in the file
 
 	if eErr != nil {
-		log.Println("ERROR WITH ENCODER - DIR HASHMAP")
+		log.Printf("ERROR WITH ENCODER - {%+v} - DIR HASHMAP\n", eErr)
 		return eErr
 	}
 
@@ -280,7 +284,7 @@ func RetrieveDirMetadataHash() error {
 	dErr := decode.Decode(&dirMetadataHash) // decode the file back into the hashmap
 
 	if dErr != nil {
-		log.Println("ERROR WITH DECODER - DIR HASHMAP")
+		log.Printf("ERROR WITH DECODER - {%+v} - DIR HASHMAP\n", dErr)
 		return dErr
 	}
 
@@ -329,7 +333,7 @@ func PrintNodePersistenceHash() {
 	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 	log.Println("PRINTING NODE METADATA HASHMAP")
 	for key, value := range nodePersistenceHash {
-		log.Printf("Key: %x, Value: %v\n", key, value)
+		log.Printf("Key: %v, Value: %v\n", key, value)
 	}
 	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 }

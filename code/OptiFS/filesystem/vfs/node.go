@@ -238,7 +238,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	// Not sure if attributes carry over node Lookups, check persistent storage to be sure
 	var existingHash [64]byte
 	var existingRef uint64
-    if err, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == nil && !isDir {
+    if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == nil && !isDir {
         existingHash = hash
         existingRef = ref
     }
@@ -299,7 +299,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 	// Search for persistent hash or ref's
 	log.Println("Searching for persistently stored hash and ref")
-	if err, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath()); err == nil && !isDir {
+	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath()); err == nil && !isDir {
 		existingHash = hash
 		existingRef = ref
 		log.Printf("Found - {%v} - {%+v}\n", existingHash, existingRef)
@@ -347,7 +347,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
     // instead of node
     var existingHash [64]byte
     var existingRef uint64
-    if err, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == nil {
+    if err, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == nil {
         log.Println("Persisten hash and ref exists for file")
         existingHash = hash
         existingRef = ref
@@ -646,7 +646,7 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 	// Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
 	// for custom metadata to cleanup
-	herr, _, _, _, contentHash, refNum := metadata.RetrieveNodeInfo(filePath)
+	herr, _, _, _, _, _, contentHash, refNum := metadata.RetrieveNodeInfo(filePath)
 	if herr == nil {
 		// Mark if it exists
 		customExists = true
@@ -988,11 +988,13 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 	// Before moving, check whether it's a directory or not
 	originalPath := filepath.Join(n.RPath(), name)
 	newPath := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
-	lErr, lAttr, lMode, lIsDir, lHash, lRef := metadata.RetrieveNodeInfo(originalPath)
+	lErr, lSIno, lSMode, lSGen, lMode, lIsDir, lHash, lRef := metadata.RetrieveNodeInfo(originalPath)
 	if lErr != nil {
 		log.Println("Entry doesn't exist in our persistent store - big error, why doesn't it??")
 		return fs.ToErrno(syscall.ENOENT)
 	}
+
+    stable := &fs.StableAttr{Ino: lSIno, Mode: lSMode, Gen: lSGen}
 
 	var returnErr syscall.Errno
 	// IFF this operation is to be done atomically (which is a more delicate operation)
@@ -1012,7 +1014,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 		metadata.RemoveNodeInfo(originalPath)
 		log.Println("Removed old persistent entry")
 		if lIsDir { // If it's a directory
-			metadata.StoreDirInfo(newPath, lAttr, lMode)
+			metadata.StoreDirInfo(newPath, stable, lMode)
 			// Copy the old metadata over since directory custom metadata is
 			// indexed by path
 			tmpErr, tmpMetadata := metadata.LookupDirMetadata(originalPath)
@@ -1026,7 +1028,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 			metadata.RemoveDirEntry(originalPath)
 			log.Println("Updated new dir entry")
 		} else { // If it's a regfile
-			metadata.StoreRegFileInfo(newPath, lAttr, lMode, lHash, lRef)
+			metadata.StoreRegFileInfo(newPath, stable, lMode, lHash, lRef)
 			log.Println("Updated new regfile entry")
 		}
 	}

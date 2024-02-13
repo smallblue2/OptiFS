@@ -237,13 +237,14 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 // Handles the creation of intended hardlinks
 func HandleHardlinkInstantiation(ctx context.Context, n *OptiFSNode, targetPath, sourcePath, name string, s *syscall.Stat_t, out *fuse.EntryOut) (syscall.Errno, *fs.Inode) {
 	// Ensure that there is an existing entry for the source
-	sErr, sStableAttr, _, _, sHash, sRef := metadata.RetrieveNodeInfo(sourcePath)
+	sErr, sStableIno, sStableMode, sStableGen, _, _, sHash, sRef := metadata.RetrieveNodeInfo(sourcePath)
 	if sErr != nil {
 		return syscall.ENOENT, nil
 	}
+    stable := &fs.StableAttr{Ino: sStableIno, Mode: sStableMode, Gen: sStableGen}
 
 	// Ensure that there ISNT an existing entry for the target
-	tErr, _, _, _, _, _ := metadata.RetrieveNodeInfo(targetPath)
+	tErr, _, _, _, _, _, _, _ := metadata.RetrieveNodeInfo(targetPath)
 	if tErr == nil {
 		return syscall.EEXIST, nil
 	}
@@ -253,14 +254,14 @@ func HandleHardlinkInstantiation(ctx context.Context, n *OptiFSNode, targetPath,
 	log.Println("Created new InodeEmbedder")
 
 	// Create the inode structure within FUSE, using the SOURCE's stable attr
-	x := n.NewInode(ctx, nd, *sStableAttr)
+	x := n.NewInode(ctx, nd, *stable)
 	log.Println("Created Inode")
 
 	out.Attr.FromStat(s)
 	log.Println("Filled out from stat")
 
 	// Persistently store the info
-	metadata.StoreRegFileInfo(targetPath, sStableAttr, s.Mode, sHash, sRef)
+	metadata.StoreRegFileInfo(targetPath, stable, s.Mode, sHash, sRef)
 
 	return fs.OK, x
 }
@@ -273,7 +274,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 	var fh *OptiFSFile
 
 	// TRY AND FIND CUSTOM NODE
-	ferr, existingStableAttr, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
+	ferr, sIno, sMode, sGen, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
 	if ferr != nil { // If custom node doesn't exist, create a new one
 
 		log.Println("Persistent node entry doesn't exist")
@@ -325,6 +326,8 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 	log.Printf("Found existing persistent node entry - ISDIR: {%v} REFNUM {%v} HASH {%+v}\n", isDir, existingRef, existingHash)
 
+    stable := &fs.StableAttr{Ino: sIno, Mode: sMode, Gen: sGen}
+
 	var nd fs.InodeEmbedder
 	// Create a node with the existing attributes we found
 	if !isDir {
@@ -344,10 +347,10 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		log.Println("Filled out attributes with custom metadata!")
 
 		if fdesc != nil && flags != nil {
-			fh = NewOptiFSFile(*fdesc, *existingStableAttr, *flags, existingHash, existingRef)
+			fh = NewOptiFSFile(*fdesc, *stable, *flags, existingHash, existingRef)
 		}
 
-		x := n.NewInode(ctx, nd, *existingStableAttr)
+		x := n.NewInode(ctx, nd, *stable)
 
 		return fs.OK, x, fh
 
@@ -365,7 +368,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		metadata.FillAttr(customMetadata, &out.Attr)
 		log.Println("Filled out attributes with custom metadata!")
 
-		x := n.NewInode(ctx, nd, *existingStableAttr)
+		x := n.NewInode(ctx, nd, *stable)
 
 		return fs.OK, x, fh
 	}
