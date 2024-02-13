@@ -47,7 +47,8 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
-	metadata.RetrievePersistantStorage() // retrieve the hashmaps
+	metadata.RetrievePersistantStorage()    // retrieve the hashmaps
+	metadata.PrintRegularFileMetadataHash() // print for debugging purposes
 
 	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)

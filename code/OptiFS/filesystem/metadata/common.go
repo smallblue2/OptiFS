@@ -11,14 +11,20 @@ import (
 
 // Function updates all MapEntryMetadata attributes from the given unstable attributes
 func updateAllFromStat(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) {
+	// not sure if we should lock dirMutex or metadataMutex
+	// -> used in both sets of functions but takes in a MapEntryMetadata??
 
-    log.Printf("New Mode: 0x%X\n", (*stableAttr).Mode)
-    // Take these from our stable attributes
-    (*metadata).Ino = (*stableAttr).Ino
-    (*metadata).Gen = (*stableAttr).Gen
+	// needs a write lock as we are modifying the attributes
+	dirMutex.Lock()
+	defer dirMutex.Unlock()
 
-    // Take these from the underlying node's stat
-    (*metadata).Mode = (*unstableAttr).Mode
+	log.Printf("New Mode: 0x%X\n", (*stableAttr).Mode)
+	// Take these from our stable attributes
+	(*metadata).Ino = (*stableAttr).Ino
+	(*metadata).Gen = (*stableAttr).Gen
+
+	// Take these from the underlying node's stat
+	(*metadata).Mode = (*unstableAttr).Mode
 	(*metadata).Atim = (*unstableAttr).Atim
 	(*metadata).Mtim = (*unstableAttr).Mtim
 	(*metadata).Ctim = (*unstableAttr).Ctim
@@ -33,4 +39,3 @@ func updateAllFromStat(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t,
 	(*metadata).X__pad0 = (*unstableAttr).X__pad0
 	(*metadata).X__unused = (*unstableAttr).X__unused
 }
-
