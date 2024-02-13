@@ -343,9 +343,20 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	// Not sure if ACCESS is checked for opening a file
 	log.Printf("\n=======================\nOpen Flags: (0x%v)\n=======================\n", strconv.FormatInt(int64(flags), 16))
 
+    // Not sure file attributes are persisten between lookups, better to retrieve from persisten store
+    // instead of node
+    var existingHash [64]byte
+    var existingRef uint64
+    if err, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == nil {
+        log.Println("Persisten hash and ref exists for file")
+        existingHash = hash
+        existingRef = ref
+    }
+
+
 	// Check custom permissions for opening the file
 	// Lookup metadata entry
-	herr, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	herr, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef) 
 	if herr == nil { // If we found custom metadata
 		log.Println("Checking custom metadata for OPEN permission")
 		allowed := permissions.CheckOpenPermissions(ctx, fileMetadata, flags)
@@ -361,7 +372,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	}
 
 	// Creates a custom filehandle from the returned file descriptor from Open
-	optiFile := NewOptiFSFile(fileDescriptor, n.GetAttr(), flags, n.currentHash, n.refNum)
+	optiFile := NewOptiFSFile(fileDescriptor, n.GetAttr(), flags, existingHash, existingRef)
 	//log.Println("Created a new loopback file")
 	return optiFile, flags, fs.OK
 }
