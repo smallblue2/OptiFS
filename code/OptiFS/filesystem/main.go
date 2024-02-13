@@ -2,21 +2,26 @@ package main
 
 import (
 	"filesystem/metadata"
+	"filesystem/permissions"
 	"filesystem/vfs"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/user"
 	"path"
+	"strconv"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
+
+var SysadminUID, SysadminGID uint32
 
 func main() {
 	log.Println("Starting OptiFS")
 	log.SetFlags(log.Lmicroseconds)
 	debug := flag.Bool("debug", false, "enter debug mode")
-    rmpersist := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
+    	rmpersist := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
 
 	flag.Parse() // parse arguments
 	if flag.NArg() < 2 {
@@ -42,6 +47,35 @@ func main() {
 		RootNode: data,
 	}
 
+	permissions.RetrieveSysadmin()
+
+	// get the UID and GID of the sysadmin that runs the filesystem
+	// this is saved (persisent), so we only need to get it once
+	if !permissions.SysAdmin.Set {
+		log.Println("No Sysadmin found, setting user as sysadmin.")
+
+		sysadmin, sErr := user.Current() // get the current user
+		if sErr != nil {
+			log.Fatalf("Couldn't get sysadmin info!: %v\n", sErr)
+		}
+
+		u, uErr := strconv.Atoi(sysadmin.Uid) // get the UID
+		if uErr != nil {
+			log.Fatalf("Couldn't get sysadmin UID!: %v\n", uErr)
+		}
+
+		g, gErr := strconv.Atoi(sysadmin.Gid) // get the GID
+		if gErr != nil {
+			log.Fatalf("Couldn't get sysadmin GID!: %v\n", gErr)
+		}
+
+		// fill in sysadmin details
+		permissions.SysAdmin.UID = uint32(u)
+		permissions.SysAdmin.GID = uint32(g)
+		permissions.SysAdmin.Set = true
+
+	}
+
 	// mount the filesystem
 	server, err := fs.Mount(flag.Arg(0), root, options)
 	if err != nil {
@@ -50,10 +84,11 @@ func main() {
 
     if !(*rmpersist) {
         metadata.RetrievePersistantStorage() // retrieve the hashmaps
-        // print for debugging purposes
-        metadata.PrintRegularFileMetadataHash()
-        metadata.PrintDirMetadataHash()
-        metadata.PrintNodePersistenceHash()
+	// print for debugging purposes
+	metadata.PrintRegularFileMetadataHash()
+	metadata.PrintDirMetadataHash()
+	metadata.PrintNodePersistenceHash()
+	permissions.PrintSysadminInfo()
     }
 
 	log.Println("=========================================================")
@@ -61,11 +96,12 @@ func main() {
 	log.Printf("DEBUG: %v", options.Debug)
 	log.Printf("RMPERSIST: %v", *rmpersist)
 	log.Println("=========================================================")
-
 	// when we are shutting down the filesystem, save the hashmaps
+
     if !(*rmpersist) {
         defer func() {
             metadata.SavePersistantStorage()
+	    permissions.SaveSysadmin()
             // print for debugging purposes
             metadata.PrintRegularFileMetadataHash()
             metadata.PrintDirMetadataHash()
