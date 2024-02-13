@@ -53,11 +53,13 @@ func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *u
 
 // Retrieves the content hash and reference number of a node in the nodePersistenceHash
 func RetrieveNodeInfo(path string) (error, *fs.StableAttr, uint32, bool, [64]byte, uint64) {
+    log.Printf("Searching for {%v} in {%+v}\n", path, nodePersistenceHash)
 	info, ok := nodePersistenceHash[path]
 	if !ok {
+        log.Println("Failed to retrieve node!")
 		return errors.New("No node info available for path"), &fs.StableAttr{}, 0, false, [64]byte{}, 0
 	}
-
+    log.Println("Retrieved node!")
 	return nil, &info.stableAttr, info.mode, info.isDir, info.contentHash, info.refNum
 }
 

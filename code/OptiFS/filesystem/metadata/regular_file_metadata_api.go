@@ -3,11 +3,13 @@
 package metadata
 
 import (
+	"context"
 	"errors"
 	"log"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 // Performs a lookup on the regularFileMetadataHash to tell if the provided content hash is unique.
@@ -25,6 +27,26 @@ func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
 	// If it exists, return the underlying Inode
 	log.Println("Content isn't unique!")
 	return !exists, entry.UnderlyingInode
+}
+
+// Gets the most recent entry in a MapEntry
+// Returns nil if there is no entry
+func RetrieveRecent(entry *MapEntry) *MapEntryMetadata {
+    indx := entry.IndexCounter
+    // If it's empty, return nothing
+    if indx == 0 {
+        return nil
+    }
+    for indx := entry.IndexCounter; indx >= 0; indx-- {
+        meta, ok := entry.EntryList[indx]
+        if ok {
+            log.Printf("Found metadata at {%v}\n", indx)
+            return meta
+        }
+        log.Printf("Nothing at {%v}\n", indx)
+    }
+    log.Println("Couldn't find an entry!")
+    return nil
 }
 
 // Retrieves regular file metadata for a hash and refnum provided. Returns an error if it cannot be found
@@ -144,7 +166,7 @@ func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, 
 // Updates a MapEntryMetadata instance corresponding to the content hash and reference num provided
 //
 // If refNum or contentHash is invalid, it returns an error
-func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) error {
+func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) error {
 
 	log.Println("Updating metadata through lookup...")
 	// Ensure that contentHash and refNum is valid
@@ -158,7 +180,7 @@ func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstable
 	log.Printf("unstableAttr: %+v\n", unstableAttr)
 
 	// Now we can be sure the entry exists, let's update it
-    updateAllFromStat(metadata, unstableAttr, stableAttr)
+    updateAllFromStat(metadata, unstableAttr, stableAttr, path)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through lookup")
@@ -172,6 +194,7 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
     log.Println("Migrating old metadata across to new entry.")
 
 	// Old attributes to carry across
+    (*newMeta).Path = (*oldMeta).Path
 	(*newMeta).Mode = (*oldMeta).Mode
 	(*newMeta).Ctim = (*oldMeta).Ctim
 	(*newMeta).Uid = (*oldMeta).Uid
@@ -191,6 +214,65 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
 	(*newMeta).X__unused = (*unstableAttr).X__unused
 
 	return nil
+}
+
+// Handle the passover or metadata in a duplicate scenario, where the underlying node is a hardlink, but we don't want it to appear as so
+func MigrateDuplicateFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMetadata, unstableAttr *syscall.Stat_t) error {
+
+    log.Println("Migrating old metadata across to new entry for duplicate file")
+
+
+    // Old attributes to carry across
+    (*newMeta).Path = (*oldMeta).Path
+    (*newMeta).Mode = (*oldMeta).Mode
+    (*newMeta).Ctim = (*oldMeta).Ctim
+    (*newMeta).Uid = (*oldMeta).Uid
+    (*newMeta).Gid = (*oldMeta).Gid
+    (*newMeta).Dev = (*oldMeta).Dev
+    (*newMeta).Atim = (*oldMeta).Atim
+    (*newMeta).Rdev = (*oldMeta).Rdev
+	(*newMeta).Nlink = (*oldMeta).Nlink
+	(*newMeta).X__pad0 = (*oldMeta).X__pad0
+	(*newMeta).X__unused = (*oldMeta).X__unused
+
+    // Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
+	(*newMeta).Size = (*unstableAttr).Size
+	(*newMeta).Blksize = (*unstableAttr).Blksize
+	(*newMeta).Blocks = (*unstableAttr).Blocks
+
+    return nil
+
+}
+
+// Handle the creation of a metadata entry for a new duplicate file with no previous metadata entry
+func InitialiseNewDuplicateFileMetadata(ctx context.Context, newMeta *MapEntryMetadata, spareUnstableAttr *syscall.Stat_t, linkUnstableAttr *syscall.Stat_t, path string) error {
+
+    caller, check := fuse.FromContext(ctx)
+    if !check {
+        log.Println("No caller info available")
+        return errors.New("No caller info available")
+    }
+    uid, gid := uint32(caller.Uid), uint32(caller.Gid)
+
+    // Old attributes to carry across
+    (*newMeta).Path = path
+    (*newMeta).Mode = (*spareUnstableAttr).Mode
+    (*newMeta).Ctim = (*spareUnstableAttr).Ctim
+    (*newMeta).Uid = uid
+    (*newMeta).Gid = gid
+    (*newMeta).Dev = (*spareUnstableAttr).Dev
+    (*newMeta).Atim = (*spareUnstableAttr).Atim
+    (*newMeta).Rdev = (*spareUnstableAttr).Rdev
+	(*newMeta).Nlink = (*spareUnstableAttr).Nlink
+	(*newMeta).X__pad0 = (*spareUnstableAttr).X__pad0
+	(*newMeta).X__unused = (*spareUnstableAttr).X__unused
+
+    // Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
+	(*newMeta).Size = (*linkUnstableAttr).Size
+	(*newMeta).Blksize = (*linkUnstableAttr).Blksize
+	(*newMeta).Blocks = (*linkUnstableAttr).Blocks
+
+    return nil
 }
 
 // Creates a new MapEntry in the main hash map when provided with a contentHash

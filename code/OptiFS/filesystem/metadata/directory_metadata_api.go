@@ -44,7 +44,7 @@ func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t, stableAttr *fs.St
 	log.Println("Found the metadata struct")
 
 	// Now we can be sure the entry exists, let's update it
-    updateAllFromStat(metadata, unstableAttr, stableAttr)
+    updateAllFromStat(metadata, unstableAttr, stableAttr, path)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through lookup")

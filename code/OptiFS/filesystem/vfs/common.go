@@ -18,16 +18,23 @@ import (
 //
 // Assumes either an OptiFSNode input, or an OptiFSFile input.
 func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn, n *OptiFSNode, f *OptiFSFile, out *fuse.AttrOut) syscall.Errno {
-	// If we need to - Manually change the underlying attributes ourselves
-    path := n.RPath()
 
+	// If we need to - Manually change the underlying attributes ourselves
     var isOwner bool
     var hasWrite bool
+    var path string
 
     // Check owner and write permission status
     if customMetadata != nil {
+        log.Println("We have custom metadata!")
         isOwner = permissions.IsOwner(ctx, customMetadata)
+        log.Printf("Is user owner: {%v}\n", isOwner)
         hasWrite = permissions.CheckPermissions(ctx, customMetadata, 1)
+        log.Printf("Has write perm: {%v}\n", hasWrite)
+        path = customMetadata.Path
+    } else {
+        log.Println("No custom metadata!")
+        path = n.RPath()
     }
 
     log.Printf("Setting attributes for '%v'\n", path)
@@ -339,6 +346,11 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
         if fdesc != nil && flags != nil {
             fh = NewOptiFSFile(*fdesc, *existingStableAttr, *flags, existingHash, existingRef)
         }
+
+        x := n.NewInode(ctx, nd, *existingStableAttr)
+        
+        return fs.OK, x, fh
+
     } else {
         log.Println("IS a directory!")
 
@@ -352,12 +364,9 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
         }
         metadata.FillAttr(customMetadata, &out.Attr)
         log.Println("Filled out attributes with custom metadata!")
+
+        x := n.NewInode(ctx, nd, *existingStableAttr)
+        
+        return fs.OK, x, fh
     }
-
-    // Create the inode structure within FUSE
-    x := n.NewInode(ctx, nd, *existingStableAttr)
-
-    log.Println("Created Inode")
-
-    return fs.OK, x, fh
 }

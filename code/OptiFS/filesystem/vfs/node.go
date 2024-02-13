@@ -79,8 +79,8 @@ var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))  // find conflicting locks for give
 var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))  // gets a lock on a node
 var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil)) // gets a lock on a node, waits for it to be ready
 // var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))    // Changes the directory a node is in
-var _ = (fs.NodeMknoder)((*OptiFSNode)(nil))    // Similar to lookup, but creates the inode
-var _ = (fs.NodeLinker)((*OptiFSNode)(nil))     // For handling hard links
+var _ = (fs.NodeMknoder)((*OptiFSNode)(nil)) // Similar to lookup, but creates the inode
+var _ = (fs.NodeLinker)((*OptiFSNode)(nil))  // For handling hard links
 // var _ = (fs.NodeSymlinker)((*OptiFSNode)(nil))  // For handling hard links
 // var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil)) // For reading symlinks
 
@@ -232,18 +232,19 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
 func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	log.Println("NODE || entered GETATTR")
-	// if we have a file handle, use it to get the attributes
-	if f != nil {
-		log.Println("Filehandle isn't nil!")
-		return f.(fs.FileGetattrer).Getattr(ctx, out)
-	}
-
-	log.Println("Filehandle is nil, using node!")
 
 	path := n.RPath()
 
+	// Not sure if attributes carry over node Lookups, check persistent storage to be sure
+	var existingHash [64]byte
+	var existingRef uint64
+    if err, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == nil && !isDir {
+        existingHash = hash
+        existingRef = ref
+    }
+
 	// Try and get an entry in our own custom system
-	err1, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
 	if err1 == nil { // If it exists
 		metadata.FillAttrOut(fileMetadata, out)
 		return fs.OK
@@ -254,24 +255,33 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 		return fs.OK
 	}
 
-	log.Println("Statting underlying node")
+	log.Println("No custom metadata available - Statting underlying node")
 
 	// OTHERWISE, just stat the node
 	var err error
 	s := syscall.Stat_t{}
-	// IF we're dealing with the root, stat it directly as opposed to handling symlinks
-	if &n.Inode == n.Root() {
-		err = syscall.Stat(path, &s) // if we are looking for the root of FS
-	} else {
-		// Otherwise, use Lstat to handle symlinks as well as normal files/directories
-		err = syscall.Lstat(path, &s) // if it's just a normal file/dir
-	}
+    if f == nil {
+        // IF we're dealing with the root, stat it directly as opposed to handling symlinks
+        if &n.Inode == n.Root() {
+            err = syscall.Stat(path, &s) // if we are looking for the root of FS
+        } else {
+            // Otherwise, use Lstat to handle symlinks as well as normal files/directories
+            err = syscall.Lstat(path, &s) // if it's just a normal file/dir
+        }
 
-	if err != nil {
-		return fs.ToErrno(err)
-	}
+        if err != nil {
+            return fs.ToErrno(err)
+        }
+    } else {
 
-	out.FromStat(&s) // no error getting attrs, fill them in out
+        serr := syscall.Fstat(f.(*OptiFSFile).fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
+
+        if serr != nil {
+            return fs.ToErrno(serr)
+        }
+
+        out.FromStat(&s) // fill the attr into struct if no errors
+    }
 	return fs.OK
 }
 
@@ -280,8 +290,24 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 	log.Println("NODE || entered SETATTR")
 
+	// Retrieve persisten data as 'n' may have empty attributes as lookups are performed as *fs.Inode's, as opposed to
+	// *OptiFSNode, so it seems like attributes cannot always carry across operations
+
+	var existingHash [64]byte
+	var existingRef uint64
+
+	// Search for persistent hash or ref's
+	log.Println("Searching for persistently stored hash and ref")
+	if err, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath()); err == nil && !isDir {
+		existingHash = hash
+		existingRef = ref
+		log.Printf("Found - {%v} - {%+v}\n", existingHash, existingRef)
+	} else {
+		log.Println("No persistent regfile data found!")
+	}
+
 	// Check to see if we can find an entry in our node hashmap
-	err1, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
 	if err1 == nil {
 		log.Println("Setting attributes for custom regular file metadata.")
 		if f != nil {
@@ -574,7 +600,7 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 		return nil, nil, 0, fs.ToErrno(err)
 	}
 
-    oErr, oNode, oFile := HandleNodeInstantiation(ctx, n, filePath, name, &s, out, &fdesc, &flags)
+	oErr, oNode, oFile := HandleNodeInstantiation(ctx, n, filePath, name, &s, out, &fdesc, &flags)
 
 	return oNode, oFile, 0, oErr
 }
@@ -659,7 +685,7 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 }
 
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	//log.Println("ENTERED WRITE")
+	log.Println("ENTERED WRITE")
 	if f != nil {
 		// Check if we have permission to write to the file
 		err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
@@ -670,62 +696,179 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 			}
 		}
 
+		log.Println("We have permission!")
+
 		// Asset that the file is an OptiFSFile
 		OptiF := f.(*OptiFSFile)
 
 		OptiF.mu.Lock()
 		defer OptiF.mu.Unlock()
 
+		// Save the path
+		nodePath := n.RPath()
+
 		// Keep the old metadata if it exists
 		err1, oldMetadata := metadata.LookupRegularFileMetadata(OptiF.currentHash, OptiF.refNum)
+		log.Printf("Scanned for old metadata - %v\n", err1)
 
 		// Hash the current contents
 		OptiF.currentHash = hashing.HashContents(data, OptiF.flags)
 		// Check to see if it's unique
 		isUnique, _ := metadata.IsContentHashUnique(OptiF.currentHash)
-
-		// TODO: I think it should only be created in Create syscall, not write - or maybe not idk, need to think
+		log.Printf("Is unique: {%v}\n", isUnique)
 
 		// If it's unique - CREATE a new MapEntry
 		if isUnique {
 			metadata.CreateRegularFileMapEntry(OptiF.currentHash)
+			log.Println("Created a regular file MapEntry")
 			// If it already exists, simply retrieve it
 		}
 
 		err2, entry := metadata.LookupRegularFileEntry(OptiF.currentHash)
 		if err2 != nil {
+			log.Println("MapEntry doesn't exist!")
 			return 0, fs.ToErrno(syscall.EAGAIN) // return EAGAIN if we error here, not sure what is appropriate...
 		}
+		log.Println("Confirmed regular file MapEntry exists")
+
+		log.Printf("Entry index num: {%v}\n", entry.IndexCounter)
+
+		// Find an instance of a duplicate file incase we need to do de-duplication
+		// This needs to be performed before the creation of a new entry, as this gets the
+		// most recent entry
+		rec := metadata.RetrieveRecent(entry)
+		log.Printf("Searched for previous entry - {%v}\n", rec)
 
 		// Create a new MapEntryMetadata instance
 		refNum, fileMetadata := metadata.CreateRegularFileMetadata(entry)
+		log.Printf("Created a new MapEntryMetadata object at refnum {%v}\n", refNum)
 		// Set the file handle's refnum to the entry
 		OptiF.refNum = refNum
 
 		// Update our persistence hash
-		metadata.UpdateNodeInfo(n.RPath(), nil, nil, nil, &OptiF.currentHash, &OptiF.refNum)
+		metadata.UpdateNodeInfo(nodePath, nil, nil, nil, &OptiF.currentHash, &OptiF.refNum)
+		log.Println("Updated node info")
 
 		// Perform the write
+		if !isUnique {
 
-		// TODO: Set up links if non-unique NEEDS TO BE ATOMIC ( gon' be hard :( )
-		numOfBytesWritten, werr := syscall.Pwrite(OptiF.fdesc, data, off)
+			if rec == nil {
+				log.Println("Cannot find the original file of duplicate content!")
+				metadata.RemoveRegularFileMetadata(OptiF.currentHash, OptiF.refNum)
+				return 0, fs.ToErrno(syscall.ENOENT)
+			}
 
-		// Fill in the MapEntryMetadata object
-		var st syscall.Stat_t
-		serr := syscall.Fstat(OptiF.fdesc, &st)
-		if serr != nil {
-			return 0, fs.ToErrno(serr)
+			log.Println("Performing atomic linking - file isn't unique!")
+
+			// Create a tmpFilename to perform all operations on
+			tmpFilePath := nodePath + "~(TMP)"
+			// Create a hardlink to tmpFileName
+			linkErr := syscall.Link(rec.Path, tmpFilePath)
+			if linkErr != nil {
+				log.Printf("Failed to make temporary link - {%v} - exiting", linkErr)
+				metadata.RemoveRegularFileMetadata(OptiF.currentHash, OptiF.refNum)
+				return 0, fs.ToErrno(syscall.ENOLINK)
+			}
+			log.Printf("Created temporary link at {%v}\n", tmpFilePath)
+
+			var st syscall.Stat_t
+			statErr := syscall.Lstat(tmpFilePath, &st)
+			if statErr != nil {
+				// Cleanup first
+				syscall.Unlink(tmpFilePath)
+				metadata.RemoveRegularFileMetadata(OptiF.currentHash, OptiF.refNum)
+				log.Printf("Failed to stat link - {%v} - removing and exiting!\n", statErr)
+				return 0, fs.ToErrno(syscall.ENOENT)
+			}
+			log.Println("Statted the temporary link!")
+
+			// Now rename the link onto the original file
+			renErr := syscall.Rename(tmpFilePath, nodePath)
+			if renErr != nil {
+				// Cleanup first
+				syscall.Unlink(tmpFilePath)
+				metadata.RemoveRegularFileMetadata(OptiF.currentHash, OptiF.refNum)
+				log.Printf("Failed to overwrite the original file with link - {%v} - removing and exiting!\n", renErr)
+				return 0, fs.ToErrno(syscall.EIO)
+			}
+			log.Println("Successfuly overwrote original file with temporary link file!")
+
+			// Update custom metadata
+			if err1 == nil {
+				metadata.MigrateDuplicateFileMetadata(oldMetadata, fileMetadata, &st)
+				metadata.RemoveRegularFileMetadata(OptiF.currentHash, OptiF.refNum)
+				log.Println("Updated metadata through migrating old metadata")
+			} else {
+				log.Println("No previous metadata available, creating a new file to simulate the new file metadata")
+				// Otherwise very cheeky operation - create a new file and copy the metadata
+				// Ensure we can create a file to copy the metadata from
+				spareTmpFilePath := nodePath + "~(SPARE)"
+				spareFd, spareErr := syscall.Open(spareTmpFilePath, syscall.O_CREAT|syscall.O_RDONLY, 0644)
+				if spareErr != nil {
+					log.Println("Failed to create new file - UH OH!")
+					// TODO: figure out how to atomically revert from here or implement some kind of metadata
+					return 0, fs.ToErrno(spareErr)
+				}
+				log.Printf("Created new file at {%v}\n", spareTmpFilePath)
+
+				// Stat the file
+				var spareSt syscall.Stat_t
+				spareStatErr := syscall.Fstat(spareFd, &spareSt)
+				if spareStatErr != nil {
+					// Clean up
+					log.Println("Failed to stat new file - UH OH")
+					syscall.Close(spareFd)
+					syscall.Unlink(spareTmpFilePath)
+					// TODO: figure out how to atomically revert from here or implement some kind of metadata
+					return 0, fs.ToErrno(spareStatErr)
+				}
+				log.Println("Performed stat on new file")
+				syscall.Close(spareFd)
+				syscall.Unlink(spareTmpFilePath)
+				log.Printf("Closed and removed {%v}\n", spareTmpFilePath)
+
+				// Now update the metadata using the newly created file's metadata
+				iErr := metadata.InitialiseNewDuplicateFileMetadata(ctx, fileMetadata, &spareSt, &st, nodePath)
+				if iErr != nil {
+					log.Println("Failed to apply new custom metadata - UH OH")
+					// TODO: figure out how to atomically revert from here or implement some kind of metadata
+				}
+				log.Println("Succesfully updated custom metadata!")
+			}
+
+			return uint32(len(data)), fs.OK
+		} else {
+			log.Println("Performing normal write")
+			numOfBytesWritten, werr := syscall.Pwrite(OptiF.fdesc, data, off)
+			if werr != nil {
+				log.Println("Error performing normal write!")
+				return 0, fs.ToErrno(werr)
+			}
+			log.Println("Wrote to file succesfully")
+
+			// Fill in the MapEntryMetadata object
+			var st syscall.Stat_t
+			serr := syscall.Fstat(OptiF.fdesc, &st)
+			if serr != nil {
+				log.Println("Failed to stat the file")
+				return 0, fs.ToErrno(serr)
+			}
+			log.Println("Sucessfully statted the file!")
+
+			if err1 == nil { // If we had old metadata, keep aspects of it
+				metadata.MigrateRegularFileMetadata(oldMetadata, fileMetadata, &st)
+				log.Println("Migrated old existing metadata over!")
+			} else { // If we don't have old metadata, do a full copy of the underlying node's metadata
+				stableAttr := n.StableAttr()
+				metadata.FullMapEntryMetadataUpdate(fileMetadata, &st, &stableAttr, nodePath)
+				log.Println("Performed full MapEntryMetadata update as previous metadata didn't exist!")
+			}
+
+			return uint32(numOfBytesWritten), fs.ToErrno(werr)
 		}
-
-		if err1 == nil { // If we had old metadata, keep aspects of it
-			metadata.MigrateRegularFileMetadata(oldMetadata, fileMetadata, &st)
-		} else { // If we don't have old metadata, do a full copy of the underlying node's metadata
-			stableAttr := n.StableAttr()
-			metadata.FullMapEntryMetadataUpdate(fileMetadata, &st, &stableAttr)
-		}
-
-		return uint32(numOfBytesWritten), fs.ToErrno(werr)
 	}
+
+	log.Println("No file descriptor passed - exiting!")
 
 	//log.Println("WRITE - EBADFD")
 	return 0, syscall.EBADFD // bad file descriptor
@@ -800,7 +943,7 @@ func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, 
 // From go-fuse/fs/loopback.go
 func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
 
-    log.Println("Entered RENAME")
+	log.Println("Entered RENAME")
 
 	// Check write and exec permissions of source and target directories
 	path := n.RPath()
@@ -827,53 +970,53 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 		}
 	}
 
-    log.Println("Have permission to rename in source and target directories!")
+	log.Println("Have permission to rename in source and target directories!")
 
-    // Before moving, check whether it's a directory or not
-    originalPath := filepath.Join(n.RPath(), name)
-    newPath := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
-    lErr, lAttr, lMode, lIsDir, lHash, lRef := metadata.RetrieveNodeInfo(originalPath)
-    if lErr != nil {
-        log.Println("Entry doesn't exist in our persistent store - big error, why doesn't it??")
-        return fs.ToErrno(syscall.ENOENT)
-    }
+	// Before moving, check whether it's a directory or not
+	originalPath := filepath.Join(n.RPath(), name)
+	newPath := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
+	lErr, lAttr, lMode, lIsDir, lHash, lRef := metadata.RetrieveNodeInfo(originalPath)
+	if lErr != nil {
+		log.Println("Entry doesn't exist in our persistent store - big error, why doesn't it??")
+		return fs.ToErrno(syscall.ENOENT)
+	}
 
-    var returnErr syscall.Errno
+	var returnErr syscall.Errno
 	// IFF this operation is to be done atomically (which is a more delicate operation)
 	if flags&unix.RENAME_EXCHANGE != 0 {
 		returnErr = n.renameExchange(name, newParent, newName)
 	} else {
-        // Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
-        tmp := syscall.Rename(originalPath, newPath)
-        returnErr = fs.ToErrno(tmp)
-        log.Println("Performed normal rename")
-    }
+		// Regular rename operation if there's no RENAME_EXCHANGE flag (atomic), e.g. files between filesystems (VFS <-> Disk)
+		tmp := syscall.Rename(originalPath, newPath)
+		returnErr = fs.ToErrno(tmp)
+		log.Println("Performed normal rename")
+	}
 
-    // Update our storages IFF we got fs.OK
-    if returnErr == fs.OK {
-        log.Println("Rename suceeded!")
-        // Remove the old entry
-        metadata.RemoveNodeInfo(originalPath)
-        log.Println("Removed old persistent entry")
-        if lIsDir { // If it's a directory
-            metadata.StoreDirInfo(newPath, lAttr, lMode)
-            // Copy the old metadata over since directory custom metadata is
-            // indexed by path
-            tmpErr, tmpMetadata := metadata.LookupDirMetadata(originalPath)
-            if tmpErr != nil {
-                log.Println("PANIC AHHHHH")
-                return returnErr
-            }
-            metadataPointer := metadata.CreateDirEntry(newPath)
-            (*metadataPointer) = *tmpMetadata
-            // Delete old entry
-            metadata.RemoveDirEntry(originalPath)
-            log.Println("Updated new dir entry")
-        } else { // If it's a regfile
-            metadata.StoreRegFileInfo(newPath, lAttr, lMode, lHash, lRef)
-            log.Println("Updated new regfile entry")
-        }
-    }
+	// Update our storages IFF we got fs.OK
+	if returnErr == fs.OK {
+		log.Println("Rename suceeded!")
+		// Remove the old entry
+		metadata.RemoveNodeInfo(originalPath)
+		log.Println("Removed old persistent entry")
+		if lIsDir { // If it's a directory
+			metadata.StoreDirInfo(newPath, lAttr, lMode)
+			// Copy the old metadata over since directory custom metadata is
+			// indexed by path
+			tmpErr, tmpMetadata := metadata.LookupDirMetadata(originalPath)
+			if tmpErr != nil {
+				log.Println("PANIC AHHHHH")
+				return returnErr
+			}
+			metadataPointer := metadata.CreateDirEntry(newPath)
+			(*metadataPointer) = *tmpMetadata
+			// Delete old entry
+			metadata.RemoveDirEntry(originalPath)
+			log.Println("Updated new dir entry")
+		} else { // If it's a regfile
+			metadata.StoreRegFileInfo(newPath, lAttr, lMode, lHash, lRef)
+			log.Println("Updated new regfile entry")
+		}
+	}
 
 	return returnErr
 }
@@ -884,13 +1027,13 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
 	// Open the directory of the current node
 
-    log.Println("in renameExchange, sensitive rename")
+	log.Println("in renameExchange, sensitive rename")
 
-    path := n.RPath()
+	path := n.RPath()
 
 	currDirFd, err := syscall.Open(path, syscall.O_DIRECTORY, 0)
 	if err != nil {
-        log.Printf("Error1 - %v\n", err)
+		log.Printf("Error1 - %v\n", err)
 		return fs.ToErrno(err)
 	}
 	defer syscall.Close(currDirFd)
@@ -899,57 +1042,57 @@ func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 	newParentDirPath := filepath.Join(n.RootNode.Path, newparent.EmbeddedInode().Path(nil))
 	newParentDirFd, err := syscall.Open(newParentDirPath, syscall.O_DIRECTORY, 0)
 	if err != nil {
-        log.Printf("Error2 - %v\n", err)
+		log.Printf("Error2 - %v\n", err)
 		return fs.ToErrno(err)
 	}
 	defer syscall.Close(currDirFd)
-    log.Println("Opened newParentDir")
+	log.Println("Opened newParentDir")
 
 	// Get the directory status for data integrity checks
 	//var st syscall.Stat_t
 	//if err := syscall.Fstat(currDirFd, &st); err != nil {
-    //    log.Printf("Error3 - %v\n", err)
+	//    log.Printf("Error3 - %v\n", err)
 	//	return fs.ToErrno(err)
 	//}
-    // As the additional check below was removed we don't need this, best to keep it irregardless though
+	// As the additional check below was removed we don't need this, best to keep it irregardless though
 
 	inode := &n.Inode
 	// Check to see if the user is trying to move the root directory, and that the inode number
 	// is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
-    //
-    // REMOVED: 'inode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &path).Ino' in this check due to our
-    //          custom attribute storage making it inacurrate - Do we need to replace this?
+	//
+	// REMOVED: 'inode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &path).Ino' in this check due to our
+	//          custom attribute storage making it inacurrate - Do we need to replace this?
 	if inode.Root() != inode {
 		// Return EBUSY if there is something amiss - suggesting the resource is busy
-        log.Println("Check 1 failed")
+		log.Println("Check 1 failed")
 		return syscall.EBUSY
 	}
-    log.Println("Check 1 suceeded")
+	log.Println("Check 1 suceeded")
 
 	// Check the status of the new parent directory
 	//if err := syscall.Fstat(newParentDirFd, &st); err != nil {
 	//	return fs.ToErrno(err)
 	//}
-    // As the additional check below was removed we don't need this, best to keep it irregardless though
+	// As the additional check below was removed we don't need this, best to keep it irregardless though
 
 	newParentDirInode := newparent.EmbeddedInode()
 	// Ensure that the new directory isn't the root node, and that the inodes match up, same
 	// consistency checks as above
-    //
-    // REMOVED: 'newParentDirInode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &newParentDirPath).Ino' in this check
-    //          due to our custom attribute storage making it inaccurate - Do we need to replace this?
+	//
+	// REMOVED: 'newParentDirInode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &newParentDirPath).Ino' in this check
+	//          due to our custom attribute storage making it inaccurate - Do we need to replace this?
 	if newParentDirInode.Root() != newParentDirInode {
-        log.Println("Check 2 failed")
+		log.Println("Check 2 failed")
 		return syscall.EBUSY
 	}
-    log.Println("Check 2 suceeded")
+	log.Println("Check 2 suceeded")
 
 	// Perform the actual rename operation
 	// Use Renameat2, an advanced version of Rename which accepts flags, which itself is an
 	// extension of the rename syscall. Use RENAME_EXCHANGE as this forces the exchange to
 	// occur atomically - avoiding race conditions
-    result := fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
-    log.Println("Performed renameat with RENAME_EXCHANGE flag")
+	result := fs.ToErrno(unix.Renameat2(currDirFd, name, newParentDirFd, newName, unix.RENAME_EXCHANGE))
+	log.Println("Performed renameat with RENAME_EXCHANGE flag")
 
 	return result
 }
@@ -989,13 +1132,13 @@ func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev ui
 		return nil, fs.ToErrno(err)
 	}
 
-    // Handle the creation of a new node
-    oErr, oNode, _ := HandleNodeInstantiation(ctx, n, nodePath, name, &st, out, nil, nil)
+	// Handle the creation of a new node
+	oErr, oNode, _ := HandleNodeInstantiation(ctx, n, nodePath, name, &st, out, nil, nil)
 
 	return oNode, oErr
 }
 
-//// Handles the creation of hardlinks
+// // Handles the creation of hardlinks
 func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
 	// Check write and execute permissions on the source directory
 	err1, dirMetadata := metadata.LookupDirMetadata(target.EmbeddedInode().Path(nil))
@@ -1017,21 +1160,21 @@ func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name str
 		return nil, fs.ToErrno(err)
 	}
 
-    // Get the status of this new hard link
-    st := syscall.Stat_t{}
-    if err := syscall.Stat(targetPath, &st); err != nil {
-      syscall.Unlink(targetPath)
-      return nil, fs.ToErrno(nil)
-    }
+	// Get the status of this new hard link
+	st := syscall.Stat_t{}
+	if err := syscall.Stat(targetPath, &st); err != nil {
+		syscall.Unlink(targetPath)
+		return nil, fs.ToErrno(nil)
+	}
 
-    // Reflect this in persistent store - we don't want this hardlink to have unique metadata, it's intended to be a hardlink
-    oErr, oNode := HandleHardlinkInstantiation(ctx, n, targetPath, sourcePath, name, &st, out)
-    if oErr != fs.OK {
-        syscall.Unlink(targetPath)
-        return nil, oErr
-    }
+	// Reflect this in persistent store - we don't want this hardlink to have unique metadata, it's intended to be a hardlink
+	oErr, oNode := HandleHardlinkInstantiation(ctx, n, targetPath, sourcePath, name, &st, out)
+	if oErr != fs.OK {
+		syscall.Unlink(targetPath)
+		return nil, oErr
+	}
 
-    return oNode, oErr
+	return oNode, oErr
 }
 
 //func (n *OptiFSNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {

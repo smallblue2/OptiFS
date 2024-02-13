@@ -11,12 +11,12 @@ import (
 )
 
 // Updates a MapEntryMetadata object with all data provided from the Stat_t object passed
-func FullMapEntryMetadataUpdate(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) error {
+func FullMapEntryMetadataUpdate(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) error {
 
 	log.Println("Updating metadata through struct...")
 	log.Printf("unstableAttr: %+v\n", unstableAttr)
 
-    updateAllFromStat(metadata, unstableAttr, stableAttr)
+    updateAllFromStat(metadata, unstableAttr, stableAttr, path)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through struct")

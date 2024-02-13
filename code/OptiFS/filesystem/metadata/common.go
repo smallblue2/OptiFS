@@ -10,9 +10,13 @@ import (
 )
 
 // Function updates all MapEntryMetadata attributes from the given unstable attributes
-func updateAllFromStat(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) {
+func updateAllFromStat(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) {
 
     log.Printf("New Mode: 0x%X\n", (*stableAttr).Mode)
+
+    // Save the path here for dedup purposes
+    (*metadata).Path = path
+
     // Take these from our stable attributes
     (*metadata).Ino = (*stableAttr).Ino
     (*metadata).Gen = (*stableAttr).Gen

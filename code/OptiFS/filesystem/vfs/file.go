@@ -48,7 +48,7 @@ var _ = (fs.FileHandle)((*OptiFSFile)(nil))
 var _ = (fs.FileReader)((*OptiFSFile)(nil))    // reading a file
 var _ = (fs.FileFsyncer)((*OptiFSFile)(nil))   // Ensuring things are written to disk
 var _ = (fs.FileFlusher)((*OptiFSFile)(nil))   // Flushes the file
-var _ = (fs.FileGetattrer)((*OptiFSFile)(nil)) // get attrs of a file
+//var _ = (fs.FileGetattrer)((*OptiFSFile)(nil)) // get attrs of a file
 var _ = (fs.FileReleaser)((*OptiFSFile)(nil))  // release (close) a file
 var _ = (fs.FileGetlker)((*OptiFSFile)(nil))   // find conflicting locks for given lock
 var _ = (fs.FileSetlker)((*OptiFSFile)(nil))   // gets a lock on a file
@@ -116,34 +116,34 @@ func (f *OptiFSFile) Flush(ctx context.Context) syscall.Errno {
 }
 
 // get the attributes of a file/dir, using the filehandle
-func (f *OptiFSFile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Errno {
-	// lock the operation, and make sure it doesnt unlock until function is exited
-	// unlocks when function is exited
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-    log.Println("FILE || entered GETATTR")
-
-    // If we can, fill attributes from our filehash
-    err1, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
-    if err1 == nil {
-        metadata.FillAttrOut(fileMetadata, out)
-        return fs.OK
-    }
-
-    // OTHERWISE, just stat the file
-
-	s := syscall.Stat_t{}
-	serr := syscall.Fstat(f.fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
-
-	if serr != nil {
-		return fs.ToErrno(serr)
-	}
-
-	out.FromStat(&s) // fill the attr into struct if no errors
-
-	return fs.OK
-}
+//func (f *OptiFSFile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Errno {
+//	// lock the operation, and make sure it doesnt unlock until function is exited
+//	// unlocks when function is exited
+//	f.mu.Lock()
+//	defer f.mu.Unlock()
+//
+//    log.Println("FILE || entered GETATTR")
+//
+//    // If we can, fill attributes from our filehash
+//    err1, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
+//    if err1 == nil {
+//        metadata.FillAttrOut(fileMetadata, out)
+//        return fs.OK
+//    }
+//
+//    // OTHERWISE, just stat the file
+//
+//	s := syscall.Stat_t{}
+//	serr := syscall.Fstat(f.fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
+//
+//	if serr != nil {
+//		return fs.ToErrno(serr)
+//	}
+//
+//	out.FromStat(&s) // fill the attr into struct if no errors
+//
+//	return fs.OK
+//}
 
 // FUSE's version of a close
 func (f *OptiFSFile) Release(ctx context.Context) syscall.Errno {
