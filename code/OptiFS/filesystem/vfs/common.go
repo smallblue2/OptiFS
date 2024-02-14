@@ -241,7 +241,7 @@ func HandleHardlinkInstantiation(ctx context.Context, n *OptiFSNode, targetPath,
 	if sErr != nil {
 		return syscall.ENOENT, nil
 	}
-    stable := &fs.StableAttr{Ino: sStableIno, Mode: sStableMode, Gen: sStableGen}
+	stable := &fs.StableAttr{Ino: sStableIno, Mode: sStableMode, Gen: sStableGen}
 
 	// Ensure that there ISNT an existing entry for the target
 	tErr, _, _, _, _, _, _, _ := metadata.RetrieveNodeInfo(targetPath)
@@ -326,7 +326,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 	log.Printf("Found existing persistent node entry - ISDIR: {%v} REFNUM {%v} HASH {%+v}\n", isDir, existingRef, existingHash)
 
-    stable := &fs.StableAttr{Ino: sIno, Mode: sMode, Gen: sGen}
+	stable := &fs.StableAttr{Ino: sIno, Mode: sMode, Gen: sGen}
 
 	var nd fs.InodeEmbedder
 	// Create a node with the existing attributes we found
