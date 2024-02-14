@@ -21,7 +21,8 @@ func main() {
 	log.Println("Starting OptiFS")
 	log.SetFlags(log.Lmicroseconds)
 	debug := flag.Bool("debug", false, "enter debug mode")
-	rmpersist := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
+	removePersistence := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
+	disableIntegrityCheck := flag.Bool("disable-icheck", false, "disables the integrity check of the persistent data of the filesystem")
 
 	flag.Parse() // parse arguments
 	if flag.NArg() < 2 {
@@ -82,7 +83,7 @@ func main() {
 		log.Fatalf("Mount Failed!!: %v\n", err)
 	}
 
-	if !(*rmpersist) {
+	if !(*removePersistence) {
 		metadata.RetrievePersistantStorage() // retrieve the hashmaps
 		permissions.RetrieveSysadmin()
 		// print for debugging purposes
@@ -92,14 +93,19 @@ func main() {
 		permissions.PrintSysadminInfo()
 	}
 
+    if !(*disableIntegrityCheck) {
+        metadata.InsureIntegrity()
+    }
+
 	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
 	log.Printf("DEBUG: %v", options.Debug)
-	log.Printf("RMPERSIST: %v", *rmpersist)
+	log.Printf("RMPERSIST: %v", *removePersistence)
+	log.Printf("DISABLEICHECK: %v", *disableIntegrityCheck)
 	log.Println("=========================================================")
 	// when we are shutting down the filesystem, save the hashmaps
 
-	if !(*rmpersist) {
+	if !(*removePersistence) {
 		defer func() {
 			metadata.SavePersistantStorage()
 			permissions.SaveSysadmin()
