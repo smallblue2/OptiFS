@@ -15,8 +15,6 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 )
 
-var SysadminUID, SysadminGID uint32
-
 func main() {
 	log.Println("Starting OptiFS")
 	log.SetFlags(log.Lmicroseconds)
@@ -84,7 +82,7 @@ func main() {
 
 	if !(*rmpersist) {
 		metadata.RetrievePersistantStorage() // retrieve the hashmaps
-		permissions.RetrieveSysadmin()
+		permissions.RetrieveSysadmin()       // retrieve sysadmin info
 		// print for debugging purposes
 		metadata.PrintRegularFileMetadataHash()
 		metadata.PrintDirMetadataHash()

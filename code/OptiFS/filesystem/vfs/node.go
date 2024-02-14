@@ -105,6 +105,31 @@ func (n *OptiFSNode) RPath() string {
 	return filepath.Join(n.RootNode.Path, path)
 }
 
+// checker if we are in the root of the filesystem
+// used for sysadmin purposes
+func (n *OptiFSNode) IsRoot() bool {
+	return n.RPath() == n.RootNode.Path
+}
+
+// checker to see if we are allowed to perform operations at the current location
+func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
+	// if we're in the root directory
+	if n.IsRoot() {
+		log.Println(">>> WE ARE IN ROOT!!!!!")
+		uErr, userID, _ := permissions.GetUIDGID(ctx) // get the UID of the person doing the syscall
+		if uErr != nil {
+			log.Println("ERROR GETTING UID/GID")
+			return fs.ToErrno(uErr)
+		}
+		if userID != permissions.SysAdmin.UID { // if they are not the sysadmin, they can't operate in root!
+			log.Println("Only the syadmin can do operations in root :(")
+			return fs.ToErrno(syscall.EPERM)
+		}
+	}
+
+	return nil
+}
+
 // create a new node in the system
 func (n *OptiFSRoot) newNode(parent *fs.Inode, name string, s *syscall.Stat_t) fs.InodeEmbedder {
 	// If the NewNode function has a custom definition, use it
@@ -238,10 +263,10 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	// Not sure if attributes carry over node Lookups, check persistent storage to be sure
 	var existingHash [64]byte
 	var existingRef uint64
-    if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == nil && !isDir {
-        existingHash = hash
-        existingRef = ref
-    }
+	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == nil && !isDir {
+		existingHash = hash
+		existingRef = ref
+	}
 
 	// Try and get an entry in our own custom system
 	err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
@@ -260,28 +285,28 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	// OTHERWISE, just stat the node
 	var err error
 	s := syscall.Stat_t{}
-    if f == nil {
-        // IF we're dealing with the root, stat it directly as opposed to handling symlinks
-        if &n.Inode == n.Root() {
-            err = syscall.Stat(path, &s) // if we are looking for the root of FS
-        } else {
-            // Otherwise, use Lstat to handle symlinks as well as normal files/directories
-            err = syscall.Lstat(path, &s) // if it's just a normal file/dir
-        }
+	if f == nil {
+		// IF we're dealing with the root, stat it directly as opposed to handling symlinks
+		if &n.Inode == n.Root() {
+			err = syscall.Stat(path, &s) // if we are looking for the root of FS
+		} else {
+			// Otherwise, use Lstat to handle symlinks as well as normal files/directories
+			err = syscall.Lstat(path, &s) // if it's just a normal file/dir
+		}
 
-        if err != nil {
-            return fs.ToErrno(err)
-        }
-    } else {
+		if err != nil {
+			return fs.ToErrno(err)
+		}
+	} else {
 
-        serr := syscall.Fstat(f.(*OptiFSFile).fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
+		serr := syscall.Fstat(f.(*OptiFSFile).fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
 
-        if serr != nil {
-            return fs.ToErrno(serr)
-        }
+		if serr != nil {
+			return fs.ToErrno(serr)
+		}
 
-        out.FromStat(&s) // fill the attr into struct if no errors
-    }
+		out.FromStat(&s) // fill the attr into struct if no errors
+	}
 	return fs.OK
 }
 
@@ -295,7 +320,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 	var existingHash [64]byte
 	var existingRef uint64
-    var isDir bool
+	var isDir bool
 
 	// Search for persistent hash or ref's
 	log.Println("Searching for persistently stored hash and ref")
@@ -305,7 +330,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 		log.Printf("Found - {%v} - {%+v}\n", existingHash, existingRef)
 	} else {
 		log.Println("No persistent regfile data found!")
-        isDir = true
+		isDir = true
 	}
 
 	// Check to see if we can find an entry in our node hashmap
@@ -343,20 +368,19 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	// Not sure if ACCESS is checked for opening a file
 	log.Printf("\n=======================\nOpen Flags: (0x%v)\n=======================\n", strconv.FormatInt(int64(flags), 16))
 
-    // Not sure file attributes are persisten between lookups, better to retrieve from persisten store
-    // instead of node
-    var existingHash [64]byte
-    var existingRef uint64
-    if err, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == nil {
-        log.Println("Persisten hash and ref exists for file")
-        existingHash = hash
-        existingRef = ref
-    }
-
+	// Not sure file attributes are persisten between lookups, better to retrieve from persisten store
+	// instead of node
+	var existingHash [64]byte
+	var existingRef uint64
+	if err, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == nil {
+		log.Println("Persisten hash and ref exists for file")
+		existingHash = hash
+		existingRef = ref
+	}
 
 	// Check custom permissions for opening the file
 	// Lookup metadata entry
-	herr, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef) 
+	herr, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
 	if herr == nil { // If we found custom metadata
 		log.Println("Checking custom metadata for OPEN permission")
 		allowed := permissions.CheckOpenPermissions(ctx, fileMetadata, flags)
@@ -483,6 +507,7 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 // Checks access of a node
 func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 	log.Printf("Checking ACCESS for %v\n", n.RPath())
+
 	// Prioritise custom metadata
 
 	// Check if custom metadata exists for a regular file
@@ -512,6 +537,13 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 // Make a directory
 func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	log.Println("ENTERED MKDIR")
+
+	// check if the user is allowed to make a directory here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != nil {
+		return nil, fs.ToErrno(err)
+	}
 
 	filePath := filepath.Join(n.RPath(), name)
 
@@ -994,7 +1026,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 		return fs.ToErrno(syscall.ENOENT)
 	}
 
-    stable := &fs.StableAttr{Ino: lSIno, Mode: lSMode, Gen: lSGen}
+	stable := &fs.StableAttr{Ino: lSIno, Mode: lSMode, Gen: lSGen}
 
 	var returnErr syscall.Errno
 	// IFF this operation is to be done atomically (which is a more delicate operation)
