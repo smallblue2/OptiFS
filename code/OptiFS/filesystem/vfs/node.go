@@ -125,9 +125,9 @@ func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
 			log.Println("Only the syadmin can do operations in root :(")
 			return fs.ToErrno(syscall.EACCES)
 		}
-	} else { 
-        log.Println(">>> WE ARE NOT IN ROOT!")
-    }
+	} else {
+		log.Println(">>> WE ARE NOT IN ROOT!")
+	}
 
 	return nil
 }
@@ -615,6 +615,12 @@ func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
 
 // create a REGULAR FILE that doesn't exist, also fills in the gid/uid of the user into the file attributes
 func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, f fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	// check if the user is allowed to make a file here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != nil {
+		return nil, nil, 0, fs.ToErrno(err)
+	}
 
 	// Check write and exec permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
@@ -658,6 +664,13 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 
 // Unlinks (removes) a file
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
+	// check if the user is allowed to remove a file here
+	// i.e if we are in root, are they the sysadmin?
+	aErr := n.IsAllowed(ctx)
+	if aErr != nil {
+		return fs.ToErrno(aErr)
+	}
+
 	log.Printf("UNLINK performed on %v from node %v\n", name, n.RPath())
 
 	// Check write and exec permissions on the parent directory
@@ -706,6 +719,12 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 // Unlinks (removes) a directory
 func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
+	// check if the user is allowed to remove a directory here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != nil {
+		return fs.ToErrno(err)
+	}
 
 	// Check exec and write permissions on the parent directory
 	// Don't need to check the directory being removed, as it must be empty to be removed
@@ -731,8 +750,8 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	metadata.RemoveDirEntry(filePath)
 	metadata.RemoveNodeInfo(filePath)
 
-	err := syscall.Rmdir(filePath)
-	return fs.ToErrno(err)
+	rErr := syscall.Rmdir(filePath)
+	return fs.ToErrno(rErr)
 }
 
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
@@ -1166,6 +1185,12 @@ func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 
 // Creates a node that isn't a regular file/dir/node - like device nodes or pipes
 func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// check if the user is allowed to make a node here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != nil {
+		return nil, fs.ToErrno(err)
+	}
 
 	path := n.RPath()
 
