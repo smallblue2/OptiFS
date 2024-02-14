@@ -105,6 +105,31 @@ func (n *OptiFSNode) RPath() string {
 	return filepath.Join(n.RootNode.Path, path)
 }
 
+// checker if we are in the root of the filesystem
+// used for sysadmin purposes
+func (n *OptiFSNode) IsRoot() bool {
+	return n.RPath() == n.RootNode.Path
+}
+
+// checker to see if we are allowed to perform operations at the current location
+func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
+	// if we're in the root directory
+	if n.IsRoot() {
+		log.Println(">>> WE ARE IN ROOT!!!!!")
+		uErr, userID, _ := permissions.GetUIDGID(ctx) // get the UID of the person doing the syscall
+		if uErr != nil {
+			log.Println("ERROR GETTING UID/GID")
+			return fs.ToErrno(uErr)
+		}
+		if userID != permissions.SysAdmin.UID { // if they are not the sysadmin, they can't operate in root!
+			log.Println("Only the syadmin can do operations in root :(")
+			return fs.ToErrno(syscall.EPERM)
+		}
+	}
+
+	return nil
+}
+
 // create a new node in the system
 func (n *OptiFSRoot) newNode(parent *fs.Inode, name string, s *syscall.Stat_t) fs.InodeEmbedder {
 	// If the NewNode function has a custom definition, use it
@@ -482,6 +507,7 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 // Checks access of a node
 func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 	log.Printf("Checking ACCESS for %v\n", n.RPath())
+
 	// Prioritise custom metadata
 
 	// Need to get the currentHash and refNum from the persistent store as node attributes may
@@ -515,6 +541,13 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 // Make a directory
 func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	log.Println("ENTERED MKDIR")
+
+	// check if the user is allowed to make a directory here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != nil {
+		return nil, fs.ToErrno(err)
+	}
 
 	filePath := filepath.Join(n.RPath(), name)
 

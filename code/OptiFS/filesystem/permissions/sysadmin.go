@@ -45,9 +45,7 @@ func SaveSysadmin() error {
 func RetrieveSysadmin() error {
 	dest := "permissions/OptiFSSysadminSave.gob"
 
-	// create the file if it doesn't exist, truncate it if it does
-	// we assume nobody will be calling this file, as it is a very unique name
-	file, err := os.Open(dest)
+	file, err := os.Open(dest) // open where the info was encoded
 
 	if err != nil {
 		return err
