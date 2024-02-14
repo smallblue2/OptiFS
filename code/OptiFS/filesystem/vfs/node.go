@@ -125,8 +125,9 @@ func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
 			log.Println("Only the syadmin can do operations in root :(")
 			return fs.ToErrno(syscall.EACCES)
 		}
-	}
-    log.Println(">>> WE ARE NOT IN ROOT!")
+	} else { 
+        log.Println(">>> WE ARE NOT IN ROOT!")
+    }
 
 	return nil
 }
