@@ -348,8 +348,8 @@ func InsureIntegrity() {
 	pathsToDelete := []struct {
 		path  string
 		isDir bool
-        hash [64]byte
-        ref uint64
+		hash  [64]byte
+		ref   uint64
 	}{}
 
 	for path, nodeInfo := range nodePersistenceHash {
@@ -372,22 +372,22 @@ func InsureIntegrity() {
 	for index := range pathsToDelete {
 		path := pathsToDelete[index].path
 		isDir := pathsToDelete[index].isDir
-        hash := pathsToDelete[index].hash
-        ref := pathsToDelete[index].ref
+		hash := pathsToDelete[index].hash
+		ref := pathsToDelete[index].ref
 
 		// Remove from relevant metadata struct
 		if isDir {
-            RemoveDirEntry(path)
+			RemoveDirEntry(path)
 			log.Printf("Removed custom metadata for {%v} directory.\n", path)
 		} else {
-            RemoveRegularFileMetadata(hash, ref)
-            log.Printf("Removed custom metadata for {%v} file.\n", path)
+			RemoveRegularFileMetadata(hash, ref)
+			log.Printf("Removed custom metadata for {%v} file.\n", path)
 		}
 
-        // Remove from persisten store
-        RemoveNodeInfo(path)
-        log.Printf("Removed {%v} from persistent store\n", path)
+		// Remove from persisten store
+		RemoveNodeInfo(path)
+		log.Printf("Removed {%v} from persistent store\n", path)
 	}
 
-    log.Println("FILESYSTEM HEALTHY")
+	log.Println("FILESYSTEM HEALTHY")
 }
