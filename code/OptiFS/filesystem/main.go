@@ -93,9 +93,9 @@ func main() {
 		permissions.PrintSysadminInfo()
 	}
 
-    if !(*disableIntegrityCheck) {
-        metadata.InsureIntegrity()
-    }
+	if !(*disableIntegrityCheck) {
+		metadata.InsureIntegrity()
+	}
 
 	log.Println("=========================================================")
 	log.Printf("Mounted %v with underlying root at %v\n", flag.Arg(0), data.Path)
