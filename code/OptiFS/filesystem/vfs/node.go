@@ -108,7 +108,7 @@ func (n *OptiFSNode) RPath() string {
 // checker if we are in the root of the filesystem
 // used for sysadmin purposes
 func (n *OptiFSNode) IsRoot() bool {
-	return n.RPath() == n.RootNode.Path
+	return n.Inode.Root() == &n.Inode
 }
 
 // checker to see if we are allowed to perform operations at the current location
@@ -123,9 +123,10 @@ func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
 		}
 		if userID != permissions.SysAdmin.UID { // if they are not the sysadmin, they can't operate in root!
 			log.Println("Only the syadmin can do operations in root :(")
-			return fs.ToErrno(syscall.EPERM)
+			return fs.ToErrno(syscall.EACCES)
 		}
 	}
+    log.Println(">>> WE ARE NOT IN ROOT!")
 
 	return nil
 }
