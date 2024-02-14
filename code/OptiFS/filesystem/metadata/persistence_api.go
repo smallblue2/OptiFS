@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
@@ -52,8 +53,8 @@ func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *u
 	}
 	if stableAttr != nil {
 		log.Println("Setting stableAttr")
-        store.StableIno = stableAttr.Ino
-        store.StableGen = stableAttr.Gen
+		store.StableIno = stableAttr.Ino
+		store.StableGen = stableAttr.Gen
 		store.StableMode = stableAttr.Mode
 	}
 	if mode != nil {
@@ -193,7 +194,7 @@ func SaveNodePersistenceHash(hashmap map[string]*NodeInfo) error {
 		return eErr
 	}
 
-    log.Println("Saved succesfully!")
+	log.Println("Saved succesfully!")
 
 	return nil
 }
@@ -336,4 +337,57 @@ func PrintNodePersistenceHash() {
 		log.Printf("Key: %v, Value: %v\n", key, value)
 	}
 	log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+}
+
+// Ensure integrity
+//
+// Function looks through all retrieved hashmaps and ensures all their entries align with
+// data in the underlying filesystem
+func InsureIntegrity() {
+	// Collect any miss-entries
+	pathsToDelete := []struct {
+		path  string
+		isDir bool
+        hash [64]byte
+        ref uint64
+	}{}
+
+	for path, nodeInfo := range nodePersistenceHash {
+		// check to see that the node exists
+		var st syscall.Stat_t
+		err := syscall.Stat(path, &st)
+		if err != nil {
+			// if there is an error, delete the entry
+			log.Printf("INTEGRITY ERROR: {%v} - {%v}\n", path, err)
+			pathsToDelete = append(pathsToDelete, struct {
+				path  string
+				isDir bool
+				hash  [64]byte
+				ref   uint64
+			}{path, nodeInfo.IsDir, nodeInfo.ContentHash, nodeInfo.RefNum})
+		}
+	}
+
+	// Cleanup
+	for index := range pathsToDelete {
+		path := pathsToDelete[index].path
+		isDir := pathsToDelete[index].isDir
+        hash := pathsToDelete[index].hash
+        ref := pathsToDelete[index].ref
+
+		// Remove from relevant metadata struct
+		if isDir {
+            RemoveDirEntry(path)
+			log.Printf("Removed custom metadata for {%v} directory.\n", path)
+		} else {
+            RemoveRegularFileMetadata(hash, ref)
+            log.Printf("Removed custom metadata for {%v} file.\n", path)
+		}
+
+        // Remove from persisten store
+        RemoveNodeInfo(path)
+        log.Printf("Removed {%v} from persistent store\n", path)
+	}
+
+    log.Println("FILESYSTEM HEALTHY")
 }
