@@ -3,13 +3,11 @@
 package metadata
 
 import (
-	"context"
 	"errors"
 	"log"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
-	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
 // Performs a lookup on the regularFileMetadataHash to tell if the provided content hash is unique.
@@ -17,11 +15,11 @@ import (
 // Returns a bool for whether the contentHash can be found and also returns the underlying Inode
 func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
 
-    // If it's an empty file, just state it's unique
-    var defaultHash [64]byte
-    if contentHash == defaultHash {
-        return true, 0
-    }
+	// If it's an empty file, just state it's unique
+	var defaultHash [64]byte
+	if contentHash == defaultHash {
+		return true, 0
+	}
 
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
@@ -38,9 +36,9 @@ func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
 
 	// If it exists, return the underlying Inode
 	log.Println("Content isn't unique!")
-    //log.Printf("HASH MATCHES {%+v}\n", entry.EntryList[0])
-    //log.Printf("Hash: {%+v}\n", contentHash)
-    //PrintRegularFileMetadataHash()
+	//log.Printf("HASH MATCHES {%+v}\n", entry.EntryList[0])
+	//log.Printf("Hash: {%+v}\n", contentHash)
+	//PrintRegularFileMetadataHash()
 
 	return !exists, entry.UnderlyingInode
 }
@@ -100,11 +98,11 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *Map
 //
 // Returns the retrived MapEntry, or an error if it doesn't exist
 func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
-    // If it's an empty file, just state it's unique
-    var defaultHash [64]byte
-    if contentHash == defaultHash {
-        return errors.New("Entry doesn't exist!"), nil
-    }
+	// If it's an empty file, just state it's unique
+	var defaultHash [64]byte
+	if contentHash == defaultHash {
+		return errors.New("Entry doesn't exist!"), nil
+	}
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	metadataMutex.RLock()
@@ -121,11 +119,11 @@ func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
 // Removes a MapEntryMetadata instance in regularFileMetadataHash based on content hash and refnum provided.
 // Also handles if this potentially creates an empty MapEntry struct.
 func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
-    // If we have a default hash, ignore it
-    var defaultHash [64]byte
-    if contentHash == defaultHash {
-        return nil
-    }
+	// If we have a default hash, ignore it
+	var defaultHash [64]byte
+	if contentHash == defaultHash {
+		return nil
+	}
 
 	log.Printf("Removing Metadata for refNum{%v}, contentHash{%+v}\n", refNum, contentHash)
 
@@ -308,21 +306,18 @@ func MigrateDuplicateFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMe
 }
 
 // Handle the creation of a metadata entry for a new duplicate file with no previous metadata entry
-func InitialiseNewDuplicateFileMetadata(ctx context.Context, newMeta *MapEntryMetadata, spareUnstableAttr *syscall.Stat_t, linkUnstableAttr *syscall.Stat_t, path string) error {
+func InitialiseNewDuplicateFileMetadata(newMeta *MapEntryMetadata, spareUnstableAttr *syscall.Stat_t, linkUnstableAttr *syscall.Stat_t, path string, uid uint32, gid uint32) error {
 	// needs a write lock as we are modifying the metadata
 	metadataMutex.Lock()
 	defer metadataMutex.Unlock()
 
-	caller, check := fuse.FromContext(ctx)
-	if !check {
-		log.Println("No caller info available")
-		return errors.New("No caller info available")
-	}
-	uid, gid := uint32(caller.Uid), uint32(caller.Gid)
+	log.Printf("UID: {%x}, GID: {%x}\n", uid, gid)
 
 	// Old attributes to carry across
 	(*newMeta).Path = path
 	(*newMeta).Mode = (*spareUnstableAttr).Mode
+	(*newMeta).Atim = (*spareUnstableAttr).Atim
+	(*newMeta).Mtim = (*spareUnstableAttr).Mtim
 	(*newMeta).Ctim = (*spareUnstableAttr).Ctim
 	(*newMeta).Uid = uid
 	(*newMeta).Gid = gid
@@ -344,11 +339,11 @@ func InitialiseNewDuplicateFileMetadata(ctx context.Context, newMeta *MapEntryMe
 // Creates a new MapEntry in the main hash map when provided with a contentHash
 // If the MapEntry already exists, we will simply pass back the already created MapEntry
 func CreateRegularFileMapEntry(contentHash [64]byte) *MapEntry {
-    // Ignore default hashes
-    var defaultHash [64]byte
-    if contentHash == defaultHash {
-        return nil
-    }
+	// Ignore default hashes
+	var defaultHash [64]byte
+	if contentHash == defaultHash {
+		return nil
+	}
 	// read lock for reading the hashmap
 	metadataMutex.RLock()
 	if entry, ok := regularFileMetadataHash[contentHash]; ok {

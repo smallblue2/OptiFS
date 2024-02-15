@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"path"
+	"path/filepath"
 	"strconv"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -30,7 +31,11 @@ func main() {
 		os.Exit(2)           // exit w/ error code
 	}
 
-	under := flag.Arg(1)
+	under, err := filepath.Abs(flag.Arg(1))
+    if err != nil {
+        log.Println("Couldn't get absolute path for underlying filesystem!")
+        return 
+    }
 	data := &vfs.OptiFSRoot{
 		Path: under,
 	}
@@ -46,7 +51,9 @@ func main() {
 		RootNode: data,
 	}
 
-	permissions.RetrieveSysadmin()
+    if !(*removePersistence) {
+        permissions.RetrieveSysadmin()
+    }
 
 	// get the UID and GID of the sysadmin that runs the filesystem
 	// this is saved (persisent), so we only need to get it once

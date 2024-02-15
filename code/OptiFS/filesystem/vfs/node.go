@@ -781,7 +781,12 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 }
 
 // For storing hashes for each block write under a file
-var hashHashMap = make(map[string]*bytes.Buffer) // A map keyed by a filepath and has a slice of 64byte arrays as a value
+type writeStore struct {
+    buffer *bytes.Buffer
+    uid uint32
+    gid uint32
+}
+var hashHashMap = make(map[string]*writeStore) // A map keyed by a filepath and has a slice of 64byte arrays as a value
 var hashHashMapLock sync.RWMutex
 
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
@@ -825,13 +830,21 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 		// See if an entry exists
         log.Println("Requesting hashHashMapLock")
 		hashHashMapLock.Lock()
-		byteBuffer, ok := hashHashMap[nodePath]
+		entry, ok := hashHashMap[nodePath]
 		if ok {
 			// Write to the buffer
-			byteBuffer.Write(newHash[:])
+			(*entry).buffer.Write(newHash[:])
 		} else {
 			// Buffer doesn't exist, create a new one
-			hashHashMap[nodePath] = bytes.NewBuffer(newHash[:])
+            // Extract UID and GID (doesn't work in RELEASE for some reason, so we store caller info here)
+            caller, check := fuse.FromContext(ctx)
+            var entry *writeStore
+            if !check {
+                entry = &writeStore{buffer: bytes.NewBuffer(newHash[:]), uid: 65534, gid: 65534}
+            } else {
+                entry = &writeStore{buffer: bytes.NewBuffer(newHash[:]), uid: uint32(caller.Uid), gid: uint32(caller.Gid)}
+            }
+			hashHashMap[nodePath] = entry
 		}
 		hashHashMapLock.Unlock()
         log.Println("Released hashHashMapLock")
@@ -882,14 +895,20 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
         hashHashMapLock.Unlock()
         log.Println("Writing intent, continuing to perform de-duplication steps")
 
+        // These will be defined from writeStore below, to tell who originally performed the write
+        var callerUid uint32
+        var callerGid uint32
+
 		// Calculate the final hash
         log.Println("Requesting hashHashMapLock")
 		hashHashMapLock.Lock()
         var newHash [64]byte
         if hashHashMap != nil {
-            buffer, ok := hashHashMap[n.RPath()]
+            writeStore, ok := hashHashMap[n.RPath()]
             if ok {
-                newHash = hashing.HashContents(buffer.Bytes(), 0)
+                newHash = hashing.HashContents(writeStore.buffer.Bytes(), 0)
+                callerUid = writeStore.uid
+                callerGid = writeStore.gid
                 log.Printf("Final hash computed for file: {%x}\n", newHash)
                 // Get rid of hashmap entry
                 delete(hashHashMap, n.RPath())
@@ -1023,26 +1042,26 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 					// TODO: figure out how to atomically revert from here or implement some kind of metadata
 					return fs.ToErrno(spareErr)
 				}
+				syscall.Close(spareFd)
 				log.Printf("Created new file at {%v}\n", spareTmpFilePath)
 
 				// Stat the file
 				var spareSt syscall.Stat_t
-				spareStatErr := syscall.Fstat(spareFd, &spareSt)
+				spareStatErr := syscall.Stat(spareTmpFilePath, &spareSt)
 				if spareStatErr != nil {
 					// Clean up
 					log.Println("Failed to stat new file - UH OH")
-					syscall.Close(spareFd)
 					syscall.Unlink(spareTmpFilePath)
 					// TODO: figure out how to atomically revert from here or implement some kind of metadata
 					return fs.ToErrno(spareStatErr)
 				}
-				log.Println("Performed stat on new file")
-				syscall.Close(spareFd)
+				log.Println("Performed stat on spare node")
+                log.Printf("STAT -> {%+v}\n", spareSt)
 				syscall.Unlink(spareTmpFilePath)
 				log.Printf("Closed and removed {%v}\n", spareTmpFilePath)
 
 				// Now update the metadata using the newly created file's metadata
-				iErr := metadata.InitialiseNewDuplicateFileMetadata(ctx, fileMetadata, &spareSt, &st, nodePath)
+				iErr := metadata.InitialiseNewDuplicateFileMetadata(fileMetadata, &spareSt, &st, nodePath, callerUid, callerGid)
 				if iErr != nil {
 					log.Println("Failed to apply new custom metadata - UH OH")
 					// TODO: figure out how to atomically revert from here or implement some kind of metadata
