@@ -134,6 +134,30 @@ func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
 	return nil
 }
 
+// checker to see if we are allowed to perform operations in the source and destination specified
+func (n *OptiFSNode) IsAllowedTwoLocations(ctx context.Context, newParent fs.InodeEmbedder) error {
+
+	dest := newParent.EmbeddedInode()
+
+	// if the source or the destination is in the root directory
+	if n.IsRoot() || dest.IsRoot() {
+		log.Println(">>> SRC OR DEST IS IN ROOT!!!!!")
+		uErr, userID, _ := permissions.GetUIDGID(ctx) // get the UID of the person doing the syscall
+		if uErr != nil {
+			log.Println("ERROR GETTING UID/GID")
+			return fs.ToErrno(uErr)
+		}
+		if userID != permissions.SysAdmin.UID { // if they are not the sysadmin, they can't operate in root!
+			log.Println("Only the syadmin can do operations in root :(")
+			return fs.ToErrno(syscall.EACCES)
+		}
+	} else {
+		log.Println(">>> SRC OR DEST IS NOT IN ROOT!")
+	}
+
+	return nil
+}
+
 // create a new node in the system
 func (n *OptiFSRoot) newNode(parent *fs.Inode, name string, s *syscall.Stat_t) fs.InodeEmbedder {
 	// If the NewNode function has a custom definition, use it
@@ -617,6 +641,12 @@ func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
 
 // create a REGULAR FILE that doesn't exist, also fills in the gid/uid of the user into the file attributes
 func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, f fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	// check if the user is allowed to make a file here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != nil {
+		return nil, nil, 0, fs.ToErrno(err)
+	}
 
 	// Check write and exec permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
@@ -660,6 +690,13 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 
 // Unlinks (removes) a file
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
+	// check if the user is allowed to remove a file here
+	// i.e if we are in root, are they the sysadmin?
+	aErr := n.IsAllowed(ctx)
+	if aErr != nil {
+		return fs.ToErrno(aErr)
+	}
+
 	log.Printf("UNLINK performed on %v from node %v\n", name, n.RPath())
 
 	// Check write and exec permissions on the parent directory
@@ -708,6 +745,12 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 // Unlinks (removes) a directory
 func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
+	// check if the user is allowed to remove a directory here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != nil {
+		return fs.ToErrno(err)
+	}
 
 	// Check exec and write permissions on the parent directory
 	// Don't need to check the directory being removed, as it must be empty to be removed
@@ -733,8 +776,8 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	metadata.RemoveDirEntry(filePath)
 	metadata.RemoveNodeInfo(filePath)
 
-	err := syscall.Rmdir(filePath)
-	return fs.ToErrno(err)
+	rErr := syscall.Rmdir(filePath)
+	return fs.ToErrno(rErr)
 }
 
 // For storing hashes for each block write under a file
@@ -1093,6 +1136,13 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 
 	log.Println("Entered RENAME")
 
+	// check if the user is allowed to rename a directory here (source and dest)
+	// i.e if either src/dest are in root, are they the sysadmin?
+	err := n.IsAllowedTwoLocations(ctx, newParent)
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+
 	// Check write and exec permissions of source and target directories
 	path := n.RPath()
 	err1, dir1Metadata := metadata.LookupDirMetadata(path)
@@ -1249,6 +1299,12 @@ func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 
 // Creates a node that isn't a regular file/dir/node - like device nodes or pipes
 func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// check if the user is allowed to make a node here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != nil {
+		return nil, fs.ToErrno(err)
+	}
 
 	path := n.RPath()
 
@@ -1290,6 +1346,13 @@ func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev ui
 
 // // Handles the creation of hardlinks
 func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
+	// check if the user is allowed to link nodes here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowedTwoLocations(ctx, target)
+	if err != nil {
+		return nil, fs.ToErrno(err)
+	}
+
 	// Check write and execute permissions on the source directory
 	err1, dirMetadata := metadata.LookupDirMetadata(target.EmbeddedInode().Path(nil))
 	if err1 == nil {
