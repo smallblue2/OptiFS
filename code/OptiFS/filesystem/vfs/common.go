@@ -6,7 +6,9 @@ import (
 	"context"
 	"filesystem/metadata"
 	"filesystem/permissions"
+	"fmt"
 	"log"
+	"os/user"
 	"syscall"
 	"unsafe"
 
@@ -79,9 +81,19 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 		// -1 indicates that the respective value shouldn't change
 		safeUID, safeGID := -1, -1
 		if uok {
+            // Ensure it exists!
+            _, uidErr := user.LookupId(fmt.Sprintf("%x", uid))
+            if uidErr != nil {
+                return fs.ToErrno(syscall.EINVAL)
+            }
 			safeUID = int(uid)
 		}
 		if gok {
+            // Ensure it exists!
+            _, gidErr := user.LookupGroupId(fmt.Sprintf("%x", gid))
+            if gidErr != nil {
+                return fs.ToErrno(syscall.EINVAL)
+            }
 			safeGID = int(gid)
 		}
 		// Try and update our custom metadata system isntead
