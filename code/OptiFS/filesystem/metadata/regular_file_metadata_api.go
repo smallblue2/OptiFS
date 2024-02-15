@@ -31,6 +31,10 @@ func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
 
 	// If it exists, return the underlying Inode
 	log.Println("Content isn't unique!")
+    //log.Printf("HASH MATCHES {%+v}\n", entry.EntryList[0])
+    //log.Printf("Hash: {%+v}\n", contentHash)
+    //PrintRegularFileMetadataHash()
+
 	return !exists, entry.UnderlyingInode
 }
 
@@ -66,12 +70,12 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *Map
 	metadataMutex.RLock()
 	defer metadataMutex.RUnlock()
 
-	log.Println("Looking up a contentHash and refNum...")
+	//log.Println("Looking up a contentHash and refNum...")
 
 	// First check for default values
 	var defaultByteArray [64]byte
 	if contentHash == defaultByteArray || refNum == 0 {
-		log.Println("Default values detected, no MapEntryMetadata available")
+		//log.Println("Default values detected, no MapEntryMetadata available")
 		return errors.New("Default values detected"), &MapEntryMetadata{}
 	}
 
@@ -81,7 +85,7 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *Map
 			return nil, nodeMetadata
 		}
 	}
-	log.Println("contentHash and refNum didn't lead to MapEntryMetadata")
+	//log.Println("contentHash and refNum didn't lead to MapEntryMetadata")
 	return errors.New("Couldn't find entry!"), &MapEntryMetadata{}
 }
 
