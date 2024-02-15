@@ -16,6 +16,13 @@ import (
 //
 // Returns a bool for whether the contentHash can be found and also returns the underlying Inode
 func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
+
+    // If it's an empty file, just state it's unique
+    var defaultHash [64]byte
+    if contentHash == defaultHash {
+        return true, 0
+    }
+
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	metadataMutex.RLock()
@@ -93,6 +100,11 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *Map
 //
 // Returns the retrived MapEntry, or an error if it doesn't exist
 func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
+    // If it's an empty file, just state it's unique
+    var defaultHash [64]byte
+    if contentHash == defaultHash {
+        return errors.New("Entry doesn't exist!"), nil
+    }
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	metadataMutex.RLock()
@@ -109,6 +121,12 @@ func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
 // Removes a MapEntryMetadata instance in regularFileMetadataHash based on content hash and refnum provided.
 // Also handles if this potentially creates an empty MapEntry struct.
 func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
+    // If we have a default hash, ignore it
+    var defaultHash [64]byte
+    if contentHash == defaultHash {
+        return nil
+    }
+
 	log.Printf("Removing Metadata for refNum{%v}, contentHash{%+v}\n", refNum, contentHash)
 
 	// Check to see if an entry exists
@@ -326,6 +344,11 @@ func InitialiseNewDuplicateFileMetadata(ctx context.Context, newMeta *MapEntryMe
 // Creates a new MapEntry in the main hash map when provided with a contentHash
 // If the MapEntry already exists, we will simply pass back the already created MapEntry
 func CreateRegularFileMapEntry(contentHash [64]byte) *MapEntry {
+    // Ignore default hashes
+    var defaultHash [64]byte
+    if contentHash == defaultHash {
+        return nil
+    }
 	// read lock for reading the hashmap
 	metadataMutex.RLock()
 	if entry, ok := regularFileMetadataHash[contentHash]; ok {
