@@ -116,12 +116,14 @@ func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
 	// if we're in the root directory
 	if n.IsRoot() {
 		log.Println(">>> WE ARE IN ROOT!!!!!")
-		uErr, userID, _ := permissions.GetUIDGID(ctx) // get the UID of the person doing the syscall
-		if uErr != nil {
+		err, userID, groupID := permissions.GetUIDGID(ctx) // get the UID/GID of the person doing the syscall
+		if err != nil {
 			log.Println("ERROR GETTING UID/GID")
-			return fs.ToErrno(uErr)
+			return fs.ToErrno(err)
 		}
-		if userID != permissions.SysAdmin.UID { // if they are not the sysadmin, they can't operate in root!
+
+		// if they are not the sysadmin, they can't operate in root!
+		if userID != permissions.SysAdmin.UID || groupID != permissions.SysAdmin.GID {
 			log.Println("Only the syadmin can do operations in root :(")
 			return fs.ToErrno(syscall.EACCES)
 		}
@@ -135,17 +137,19 @@ func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
 // checker to see if we are allowed to perform operations in the source and destination specified
 func (n *OptiFSNode) IsAllowedTwoLocations(ctx context.Context, newParent fs.InodeEmbedder) error {
 
-	dest := newParent.EmbeddedInode()
+	dest := newParent.EmbeddedInode() // get the inode of the destination
 
 	// if the source or the destination is in the root directory
 	if n.IsRoot() || dest.IsRoot() {
 		log.Println(">>> SRC OR DEST IS IN ROOT!!!!!")
-		uErr, userID, _ := permissions.GetUIDGID(ctx) // get the UID of the person doing the syscall
-		if uErr != nil {
+		err, userID, groupID := permissions.GetUIDGID(ctx) // get the UID/GID of the person doing the syscall
+		if err != nil {
 			log.Println("ERROR GETTING UID/GID")
-			return fs.ToErrno(uErr)
+			return fs.ToErrno(err)
 		}
-		if userID != permissions.SysAdmin.UID { // if they are not the sysadmin, they can't operate in root!
+
+		// if they are not the sysadmin, they can't operate in root!
+		if userID != permissions.SysAdmin.UID || groupID != permissions.SysAdmin.GID {
 			log.Println("Only the syadmin can do operations in root :(")
 			return fs.ToErrno(syscall.EACCES)
 		}

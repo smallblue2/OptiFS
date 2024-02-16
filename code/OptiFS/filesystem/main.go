@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/user"
 	"path"
-	"strconv"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
@@ -48,31 +46,9 @@ func main() {
 
 	permissions.RetrieveSysadmin()
 
-	// get the UID and GID of the sysadmin that runs the filesystem
-	// this is saved (persisent), so we only need to get it once
+	// if there is no sysadmin, ser the current user as the sysadmin
 	if !permissions.SysAdmin.Set {
-		log.Println("No Sysadmin found, setting user as sysadmin.")
-
-		sysadmin, sErr := user.Current() // get the current user
-		if sErr != nil {
-			log.Fatalf("Couldn't get sysadmin info!: %v\n", sErr)
-		}
-
-		u, uErr := strconv.Atoi(sysadmin.Uid) // get the UID
-		if uErr != nil {
-			log.Fatalf("Couldn't get sysadmin UID!: %v\n", uErr)
-		}
-
-		g, gErr := strconv.Atoi(sysadmin.Gid) // get the GID
-		if gErr != nil {
-			log.Fatalf("Couldn't get sysadmin GID!: %v\n", gErr)
-		}
-
-		// fill in sysadmin details
-		permissions.SysAdmin.UID = uint32(u)
-		permissions.SysAdmin.GID = uint32(g)
-		permissions.SysAdmin.Set = true
-
+		permissions.SetSysadmin()
 	}
 
 	// mount the filesystem
