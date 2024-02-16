@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"filesystem/hashing"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -782,9 +784,146 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	return fs.ToErrno(rErr)
 }
 
+// For storing hashes for each block write under a file
+type writeStore struct {
+    buffer *bytes.Buffer
+    uid uint32
+    gid uint32
+}
+var hashHashMap = make(map[string]*writeStore) // A map keyed by a filepath and has a slice of 64byte arrays as a value
+var hashHashMapLock sync.RWMutex
+
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	log.Println("ENTERED WRITE")
+	//log.Println("Entered WRITE")
 	if f != nil {
+		// Lock the file
+		f.(*OptiFSFile).mu.Lock()
+		defer f.(*OptiFSFile).mu.Unlock()
+
+		nodePath := n.RPath()
+
+		// Check if n's attributes are default
+		var defaultByteArray [64]byte
+		var hash [64]byte
+		var ref uint64
+		if n.currentHash == defaultByteArray || n.refNum == 0 {
+			// Retrieve from the persisten store
+			_, _, _, _, _, _, tmpHash, tmpRef := metadata.RetrieveNodeInfo(nodePath)
+			hash = tmpHash
+			ref = tmpRef
+		} else {
+			hash = n.currentHash
+			ref = n.refNum
+		}
+
+		// Ensure we have permission to write to the file
+		// Check if we have permission to write to the file
+		err, fileMetadata := metadata.LookupRegularFileMetadata(hash, ref)
+		if err == nil { // if it exists
+			writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1) // check write perm
+			if !writePerm {
+				return 0, syscall.EACCES
+			}
+		}
+
+		//log.Println("We have permission!")
+
+		// Hash the content
+		newHash := hashing.HashContents(data, f.(*OptiFSFile).flags)
+		// Store the hash in the hashHashMap
+		// See if an entry exists
+        log.Println("Requesting hashHashMapLock")
+		hashHashMapLock.Lock()
+		entry, ok := hashHashMap[nodePath]
+		if ok {
+			// Write to the buffer
+			(*entry).buffer.Write(newHash[:])
+		} else {
+			// Buffer doesn't exist, create a new one
+            // Extract UID and GID (doesn't work in RELEASE for some reason, so we store caller info here)
+            caller, check := fuse.FromContext(ctx)
+            var entry *writeStore
+            if !check {
+                entry = &writeStore{buffer: bytes.NewBuffer(newHash[:]), uid: 65534, gid: 65534}
+            } else {
+                entry = &writeStore{buffer: bytes.NewBuffer(newHash[:]), uid: uint32(caller.Uid), gid: uint32(caller.Gid)}
+            }
+			hashHashMap[nodePath] = entry
+		}
+		hashHashMapLock.Unlock()
+        log.Println("Released hashHashMapLock")
+
+		// Now write to the underlying file
+		//log.Println("Performing normal write")
+		numOfBytesWritten, werr := syscall.Pwrite(f.(*OptiFSFile).fdesc, data, off)
+		if werr != nil {
+			//log.Println("Error performing normal write!")
+			return 0, fs.ToErrno(werr)
+		}
+		//log.Println("Wrote to file succesfully")
+		return uint32(numOfBytesWritten), fs.OK
+	}
+
+	log.Println("No file descriptor - exiting!")
+
+	return 0, fs.ToErrno(syscall.EBADFD)
+}
+
+func (n *OptiFSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	//log.Println("ENTERED FLUSH")
+	if f != nil {
+		return f.(fs.FileFlusher).Flush(ctx)
+	}
+	//log.Println("FLUSH - EBADFD")
+	return syscall.EBADFD // bad file descriptor
+}
+
+// FUSE's version of a close
+func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	log.Printf("ENTERED RELEASE - {%v}\n", n.RPath())
+
+	if f != nil {
+
+		flags := f.(*OptiFSFile).flags
+
+        hashHashMapLock.Lock()
+        // Big check here to REALLY make sure we want to perform deduplication steps
+        // Flags have to have write intend AND the bytebuffer for the file can't be empty
+		if !(flags&syscall.O_WRONLY == syscall.O_WRONLY || flags&syscall.O_RDWR == syscall.O_RDWR ||
+			flags&syscall.O_CREAT == syscall.O_CREAT || flags&syscall.O_TRUNC == syscall.O_TRUNC ||
+			flags&syscall.O_APPEND == syscall.O_APPEND) {
+                hashHashMapLock.Unlock()
+			log.Println("No writing intent, simply releasing file")
+			return f.(*OptiFSFile).Release(ctx)
+		}
+        hashHashMapLock.Unlock()
+        log.Println("Writing intent, continuing to perform de-duplication steps")
+
+        // These will be defined from writeStore below, to tell who originally performed the write
+        var callerUid uint32
+        var callerGid uint32
+
+		// Calculate the final hash
+        log.Println("Requesting hashHashMapLock")
+		hashHashMapLock.Lock()
+        var newHash [64]byte
+        if hashHashMap != nil {
+            writeStore, ok := hashHashMap[n.RPath()]
+            if ok {
+                newHash = hashing.HashContents(writeStore.buffer.Bytes(), 0)
+                callerUid = writeStore.uid
+                callerGid = writeStore.gid
+                log.Printf("Final hash computed for file: {%x}\n", newHash)
+                // Get rid of hashmap entry
+                delete(hashHashMap, n.RPath())
+            } else {
+                log.Println("No available hash, file must be empty!")
+            }
+        } else {
+            log.Println("No hashHashMapLock, how did this happen?")
+        }
+		hashHashMapLock.Unlock()
+        log.Println("Released hashHashMapLock")
 
 		// Save the path
 		nodePath := n.RPath()
@@ -803,29 +942,10 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 			ref = n.refNum
 		}
 
-		// Check if we have permission to write to the file
-		err, fileMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-		if err == nil { // if it exists
-			writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1) // check write perm
-			if !writePerm {
-				return 0, syscall.EACCES
-			}
-		}
-
-		log.Println("We have permission!")
-
-		// Asset that the file is an OptiFSFile
-		OptiF := f.(*OptiFSFile)
-
-		OptiF.mu.Lock()
-		defer OptiF.mu.Unlock()
-
 		// Keep the old metadata if it exists
 		err1, oldMetadata := metadata.LookupRegularFileMetadata(hash, ref)
 		log.Printf("Scanned for old metadata - %v\n", err1)
 
-		// Hash the current contents
-		newHash := hashing.HashContents(data, OptiF.flags)
 		// Check to see if it's unique
 		isUnique, _ := metadata.IsContentHashUnique(newHash)
 		log.Printf("Is unique: {%v}\n", isUnique)
@@ -840,7 +960,7 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 		err2, entry := metadata.LookupRegularFileEntry(newHash)
 		if err2 != nil {
 			log.Println("MapEntry doesn't exist!")
-			return 0, fs.ToErrno(syscall.EAGAIN) // return EAGAIN if we error here, not sure what is appropriate...
+			return fs.ToErrno(syscall.ENODATA) // return EAGAIN if we error here, not sure what is appropriate...
 		}
 		log.Println("Confirmed regular file MapEntry exists")
 
@@ -861,13 +981,17 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 		metadata.UpdateNodeInfo(nodePath, nil, nil, nil, &newHash, &newRef)
 		log.Println("Updated node info")
 
-		// Perform the write
+		// Perform the deduplication
 		if !isUnique {
 
+			// If it's not unique, close the file - we're getting rid of it
+			f.(fs.FileReleaser).Release(ctx)
+
 			if rec == nil {
+				// Somehow we confirmed that it's not unique, but can't find the original content
 				log.Println("Cannot find the original file of duplicate content!")
 				metadata.RemoveRegularFileMetadata(newHash, newRef)
-				return 0, fs.ToErrno(syscall.ENOENT)
+				return fs.ToErrno(syscall.ENOENT)
 			}
 
 			log.Println("Performing atomic linking - file isn't unique!")
@@ -879,7 +1003,7 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 			if linkErr != nil {
 				log.Printf("Failed to make temporary link - {%v} - exiting", linkErr)
 				metadata.RemoveRegularFileMetadata(newHash, newRef)
-				return 0, fs.ToErrno(syscall.ENOLINK)
+				return fs.ToErrno(syscall.ENOLINK)
 			}
 			log.Printf("Created temporary link at {%v}\n", tmpFilePath)
 
@@ -890,7 +1014,7 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 				syscall.Unlink(tmpFilePath)
 				metadata.RemoveRegularFileMetadata(newHash, newRef)
 				log.Printf("Failed to stat link - {%v} - removing and exiting!\n", statErr)
-				return 0, fs.ToErrno(syscall.ENOENT)
+				return fs.ToErrno(syscall.ENOENT)
 			}
 			log.Println("Statted the temporary link!")
 
@@ -901,7 +1025,7 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 				syscall.Unlink(tmpFilePath)
 				metadata.RemoveRegularFileMetadata(newHash, newRef)
 				log.Printf("Failed to overwrite the original file with link - {%v} - removing and exiting!\n", renErr)
-				return 0, fs.ToErrno(syscall.EIO)
+				return fs.ToErrno(syscall.EIO)
 			}
 			log.Println("Successfuly overwrote original file with temporary link file!")
 
@@ -912,35 +1036,36 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 				log.Println("Updated metadata through migrating old metadata")
 			} else {
 				log.Println("No previous metadata available, creating a new file to simulate the new file metadata")
-				// Otherwise very cheeky operation - create a new file and copy the metadata
+				// Otherwise very cheeky operation - create a new file and copy the metadata to simulate the metadata
+				// of a new file
 				// Ensure we can create a file to copy the metadata from
 				spareTmpFilePath := nodePath + "~(SPARE)"
 				spareFd, spareErr := syscall.Open(spareTmpFilePath, syscall.O_CREAT|syscall.O_RDONLY, 0644)
 				if spareErr != nil {
 					log.Println("Failed to create new file - UH OH!")
 					// TODO: figure out how to atomically revert from here or implement some kind of metadata
-					return 0, fs.ToErrno(spareErr)
+					return fs.ToErrno(spareErr)
 				}
+				syscall.Close(spareFd)
 				log.Printf("Created new file at {%v}\n", spareTmpFilePath)
 
 				// Stat the file
 				var spareSt syscall.Stat_t
-				spareStatErr := syscall.Fstat(spareFd, &spareSt)
+				spareStatErr := syscall.Stat(spareTmpFilePath, &spareSt)
 				if spareStatErr != nil {
 					// Clean up
 					log.Println("Failed to stat new file - UH OH")
-					syscall.Close(spareFd)
 					syscall.Unlink(spareTmpFilePath)
 					// TODO: figure out how to atomically revert from here or implement some kind of metadata
-					return 0, fs.ToErrno(spareStatErr)
+					return fs.ToErrno(spareStatErr)
 				}
-				log.Println("Performed stat on new file")
-				syscall.Close(spareFd)
+				log.Println("Performed stat on spare node")
+                log.Printf("STAT -> {%+v}\n", spareSt)
 				syscall.Unlink(spareTmpFilePath)
 				log.Printf("Closed and removed {%v}\n", spareTmpFilePath)
 
 				// Now update the metadata using the newly created file's metadata
-				iErr := metadata.InitialiseNewDuplicateFileMetadata(ctx, fileMetadata, &spareSt, &st, nodePath)
+				iErr := metadata.InitialiseNewDuplicateFileMetadata(fileMetadata, &spareSt, &st, nodePath, callerUid, callerGid)
 				if iErr != nil {
 					log.Println("Failed to apply new custom metadata - UH OH")
 					// TODO: figure out how to atomically revert from here or implement some kind of metadata
@@ -948,22 +1073,17 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 				log.Println("Succesfully updated custom metadata!")
 			}
 
-			return uint32(len(data)), fs.OK
+			log.Println("Finished de-duplicating file!")
+			return fs.OK
 		} else {
-			log.Println("Performing normal write")
-			numOfBytesWritten, werr := syscall.Pwrite(OptiF.fdesc, data, off)
-			if werr != nil {
-				log.Println("Error performing normal write!")
-				return 0, fs.ToErrno(werr)
-			}
-			log.Println("Wrote to file succesfully")
+			log.Println("Simply updating metadata, file is unique")
 
 			// Fill in the MapEntryMetadata object
 			var st syscall.Stat_t
-			serr := syscall.Fstat(OptiF.fdesc, &st)
+			serr := syscall.Fstat(f.(*OptiFSFile).fdesc, &st)
 			if serr != nil {
 				log.Println("Failed to stat the file")
-				return 0, fs.ToErrno(serr)
+				return fs.ToErrno(serr)
 			}
 			log.Println("Sucessfully statted the file!")
 
@@ -976,32 +1096,14 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 				log.Println("Performed full MapEntryMetadata update as previous metadata didn't exist!")
 			}
 
-			return uint32(numOfBytesWritten), fs.ToErrno(werr)
+			log.Println("Closing the file now!")
+
+			return f.(fs.FileReleaser).Release(ctx)
 		}
 	}
 
-	log.Println("No file descriptor passed - exiting!")
+	log.Println("RELEASE - EBADFD")
 
-	//log.Println("WRITE - EBADFD")
-	return 0, syscall.EBADFD // bad file descriptor
-}
-
-func (n *OptiFSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	//log.Println("ENTERED FLUSH")
-	if f != nil {
-		return f.(fs.FileFlusher).Flush(ctx)
-	}
-	//log.Println("FLUSH - EBADFD")
-	return syscall.EBADFD // bad file descriptor
-}
-
-// FUSE's version of a close
-func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	//log.Println("ENTERED RELEASE")
-	if f != nil {
-		return f.(fs.FileReleaser).Release(ctx)
-	}
-	//log.Println("RELEASE - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
