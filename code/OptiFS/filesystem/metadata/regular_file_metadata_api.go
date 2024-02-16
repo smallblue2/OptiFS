@@ -260,6 +260,7 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
 	(*newMeta).Gid = (*oldMeta).Gid
 	(*newMeta).Dev = (*oldMeta).Dev
 	(*newMeta).Ino = (*oldMeta).Ino
+    (*newMeta).XAttr = (*oldMeta).XAttr
 
 	// New attributes to refresh from stat
 	(*newMeta).Atim = (*unstableAttr).Atim
@@ -295,6 +296,7 @@ func MigrateDuplicateFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMe
 	(*newMeta).Nlink = (*oldMeta).Nlink
 	(*newMeta).X__pad0 = (*oldMeta).X__pad0
 	(*newMeta).X__unused = (*oldMeta).X__unused
+    (*newMeta).XAttr = (*oldMeta).XAttr
 
 	// Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
 	(*newMeta).Size = (*unstableAttr).Size
@@ -313,7 +315,7 @@ func InitialiseNewDuplicateFileMetadata(newMeta *MapEntryMetadata, spareUnstable
 
 	log.Printf("UID: {%x}, GID: {%x}\n", uid, gid)
 
-	// Old attributes to carry across
+	// Attributes to take from new file
 	(*newMeta).Path = path
 	(*newMeta).Mode = (*spareUnstableAttr).Mode
 	(*newMeta).Atim = (*spareUnstableAttr).Atim
@@ -327,6 +329,7 @@ func InitialiseNewDuplicateFileMetadata(newMeta *MapEntryMetadata, spareUnstable
 	(*newMeta).Nlink = (*spareUnstableAttr).Nlink
 	(*newMeta).X__pad0 = (*spareUnstableAttr).X__pad0
 	(*newMeta).X__unused = (*spareUnstableAttr).X__unused
+    (*newMeta).XAttr = make(map[string][]byte)
 
 	// Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
 	(*newMeta).Size = (*linkUnstableAttr).Size

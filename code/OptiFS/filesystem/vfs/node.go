@@ -74,13 +74,13 @@ var _ = (fs.NodeSetattrer)((*OptiFSNode)(nil))     // Set attributes of a node
 var _ = (fs.NodeGetxattrer)((*OptiFSNode)(nil))    // Get extended attributes of a node
 var _ = (fs.NodeSetxattrer)((*OptiFSNode)(nil))    // Set extended attributes of a node
 var _ = (fs.NodeRemovexattrer)((*OptiFSNode)(nil)) // Remove extended attributes of a node
-var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes of a node
+//var _ = (fs.NodeListxattrer)((*OptiFSNode)(nil))   // List extended attributes of a node
 
 // Locking and Linking Operations
 var _ = (fs.NodeGetlker)((*OptiFSNode)(nil))  // find conflicting locks for given lock
 var _ = (fs.NodeSetlker)((*OptiFSNode)(nil))  // gets a lock on a node
 var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil)) // gets a lock on a node, waits for it to be ready
-// var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))    // Changes the directory a node is in
+var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))    // Changes the directory a node is in
 var _ = (fs.NodeMknoder)((*OptiFSNode)(nil)) // Similar to lookup, but creates the inode
 var _ = (fs.NodeLinker)((*OptiFSNode)(nil))  // For handling hard links
 // var _ = (fs.NodeSymlinker)((*OptiFSNode)(nil))  // For handling hard links
@@ -431,15 +431,21 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 
 // Get EXTENDED attribute
 func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
-	//log.Println("ENTERED GETXATTR")
+	log.Println("ENTERED GETXATTR")
+    // Retrieve hash and refnums from persistent node
+    _, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
 
 	// Check if the user has read access
-	err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+    var customMetadata *metadata.MapEntryMetadata
+    var isDir bool
+	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
 	if err1 == nil {
 		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
 		if !hasRead {
 			return 0, syscall.EACCES
 		}
+        customMetadata = nodeMetadata
+        log.Println("Set metadata to regfile metadata")
 	}
 	path := n.RPath()
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
@@ -448,24 +454,33 @@ func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (ui
 		if !hasRead {
 			return 0, syscall.EACCES
 		}
+        customMetadata = dirMetadata
+        isDir = true
+        log.Println("Set metadata to dir metadata")
 	}
 
-	// Pass it down to the filesystem below
-	attributeSize, err3 := unix.Lgetxattr(path, attr, dest)
+	attributeSize, err3 := metadata.GetCustomXAttr(customMetadata, attr, &dest, isDir)
 	return uint32(attributeSize), fs.ToErrno(err3)
 }
 
 // Set EXTENDED attribute
 func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
-	//log.Println("ENTERED SETXATTR")
+	log.Println("ENTERED SETXATTR")
+
+    // Retrieve hash and refnums from persistent node
+    _, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
 
 	// Check if the user has write access
-	err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+    var customMetadata *metadata.MapEntryMetadata
+    var isDir bool
+	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
 	if err1 == nil {
 		hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
 		if !hasWrite {
 			return syscall.EACCES
 		}
+        customMetadata = nodeMetadata
+        log.Println("Set metadata to regfile metadata")
 	}
 	path := n.RPath()
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
@@ -474,24 +489,35 @@ func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, fla
 		if !hasWrite {
 			return syscall.EACCES
 		}
+        customMetadata = dirMetadata
+        isDir = true
+        log.Println("Set metadata to dir metadata")
 	}
 
-	// Pass it down to the filesystem below
-	err3 := unix.Lsetxattr(path, attr, data, int(flags))
-	return fs.ToErrno(err3)
+	return metadata.SetCustomXAttr(customMetadata, attr, data, flags, isDir)
+
 }
 
 // Remove EXTENDED attribute
 func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
-	//log.Println("ENTERED REMOVEXATTR")
+
+	log.Println("ENTERED REMOVEXATTR")
+
+    // Retrieve hash and refnums from persistent node
+    _, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+
+    // Custom metadata and flag to tell if we're dealing with directories or not
+    var customMetadata *metadata.MapEntryMetadata
+    var isDir bool
 
 	// Check if the user has write access
-	err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
 	if err1 == nil {
 		hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
 		if !hasWrite {
 			return syscall.EACCES
 		}
+        customMetadata = nodeMetadata
 	}
 	path := n.RPath()
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
@@ -500,37 +526,49 @@ func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno
 		if !hasWrite {
 			return syscall.EACCES
 		}
+        customMetadata = dirMetadata
+        isDir = true
 	}
 
-	err3 := unix.Lremovexattr(path, attr)
-	return fs.ToErrno(err3)
+	return metadata.RemoveCustomXAttr(customMetadata, attr, isDir)
 }
 
 // List EXTENDED attributes
-func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
-	//log.Println("ENTERED LISTXATTR")
-
-	// Check if the user has read access
-	err1, nodeMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-	if err1 == nil {
-		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
-		if !hasRead {
-			return 0, syscall.EACCES
-		}
-	}
-	path := n.RPath()
-	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == nil {
-		hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
-		if !hasRead {
-			return 0, syscall.EACCES
-		}
-	}
-
-	// Pass it down to the filesystem below
-	allAttributesSize, err3 := unix.Llistxattr(path, dest)
-	return uint32(allAttributesSize), fs.ToErrno(err3)
-}
+//func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+//	//log.Println("ENTERED LISTXATTR")
+//
+//    // Retrieve hash and refnums from persistent node
+//    _, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+//
+//    // Custom metadata and flag to tell if we're dealing with directories or not
+//    var customMetadata *metadata.MapEntryMetadata
+//    var isDir bool
+//
+//	// Check if the user has read access
+//	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
+//	if err1 == nil {
+//		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
+//		if !hasRead {
+//			return 0, syscall.EACCES
+//		}
+//        customMetadata = nodeMetadata
+//	}
+//	path := n.RPath()
+//	err2, dirMetadata := metadata.LookupDirMetadata(path)
+//	if err2 == nil {
+//		hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
+//		if !hasRead {
+//			return 0, syscall.EACCES
+//		}
+//        customMetadata = dirMetadata
+//        isDir = true
+//	}
+//
+//	// Pass it down to the filesystem below
+//	allAttributesSize, err3 := metadata.ListCustomXAttr(customMetadata, &dest, isDir)
+//    log.Println("Finished listing xattr")
+//	return uint32(allAttributesSize), fs.ToErrno(err3)
+//}
 
 // Checks access of a node
 func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {

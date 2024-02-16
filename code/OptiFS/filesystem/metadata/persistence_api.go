@@ -22,7 +22,7 @@ func StoreRegFileInfo(path string, stableAttr *fs.StableAttr, mode uint32, conte
 	// needs a write lock as we are modifying the hashmap
 	nodeMutex.Lock()
 	defer nodeMutex.Unlock()
-
+    
 	nodePersistenceHash[path] = &NodeInfo{StableGen: stableAttr.Gen, StableIno: stableAttr.Ino, StableMode: stableAttr.Mode, Mode: mode, IsDir: false, ContentHash: contentHash, RefNum: refNum}
 }
 

@@ -4,7 +4,6 @@ package metadata
 
 import (
 	"syscall"
-
 	//"github.com/hanwen/go-fuse/v2/fs"
 )
 
@@ -42,6 +41,7 @@ type MapEntryMetadata struct {
 	Mtim      syscall.Timespec
 	Ctim      syscall.Timespec
 	X__unused [3]int64
+	XAttr     map[string][]byte
 }
 
 // NodeInfo is used to store data required to keep our nodes persistent between OptiFS instances
