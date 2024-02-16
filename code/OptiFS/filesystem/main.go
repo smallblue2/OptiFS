@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/user"
 	"path"
 	"path/filepath"
-	"strconv"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
@@ -22,6 +20,8 @@ func main() {
 	debug := flag.Bool("debug", false, "enter debug mode")
 	removePersistence := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
 	disableIntegrityCheck := flag.Bool("disable-icheck", false, "disables the integrity check of the persistent data of the filesystem")
+	changeSysadminUID := flag.String("change-sysadmin-uid", "", "changes the sysadmin (through UID) of the system")
+	changeSysadminGID := flag.String("change-sysadmin-gid", "", "changes the sysadmin group of the system")
 
 	flag.Parse() // parse arguments
 	if flag.NArg() < 2 {
@@ -32,10 +32,10 @@ func main() {
 	}
 
 	under, err := filepath.Abs(flag.Arg(1))
-    if err != nil {
-        log.Println("Couldn't get absolute path for underlying filesystem!")
-        return 
-    }
+	if err != nil {
+		log.Println("Couldn't get absolute path for underlying filesystem!")
+		return
+	}
 	data := &vfs.OptiFSRoot{
 		Path: under,
 	}
@@ -51,35 +51,27 @@ func main() {
 		RootNode: data,
 	}
 
-    if !(*removePersistence) {
-        permissions.RetrieveSysadmin()
-    }
+	if !(*removePersistence) {
+		permissions.RetrieveSysadmin()
+	}
 
-	// get the UID and GID of the sysadmin that runs the filesystem
-	// this is saved (persisent), so we only need to get it once
+	// if there is no sysadmin, set the current user as the sysadmin
 	if !permissions.SysAdmin.Set {
-		log.Println("No Sysadmin found, setting user as sysadmin.")
+		permissions.SetSysadmin()
+	} else if !permissions.IsUserSysadmin() {
+		log.Fatal("You cannot run this OptiFS instance: not a sysadmin.")
+	}
 
-		sysadmin, sErr := user.Current() // get the current user
-		if sErr != nil {
-			log.Fatalf("Couldn't get sysadmin info!: %v\n", sErr)
-		}
-
-		u, uErr := strconv.Atoi(sysadmin.Uid) // get the UID
-		if uErr != nil {
-			log.Fatalf("Couldn't get sysadmin UID!: %v\n", uErr)
-		}
-
-		g, gErr := strconv.Atoi(sysadmin.Gid) // get the GID
-		if gErr != nil {
-			log.Fatalf("Couldn't get sysadmin GID!: %v\n", gErr)
-		}
-
-		// fill in sysadmin details
-		permissions.SysAdmin.UID = uint32(u)
-		permissions.SysAdmin.GID = uint32(g)
-		permissions.SysAdmin.Set = true
-
+	// The user wishes to change the sysadmin UID/GID
+	if *changeSysadminUID != "" {
+		permissions.ChangeSysadminUID(*changeSysadminUID)
+		permissions.SaveSysadmin() // save the changes
+		return
+	}
+	if *changeSysadminGID != "" {
+		permissions.ChangeSysadminGID(*changeSysadminGID)
+		permissions.SaveSysadmin() // save the changes
+		return
 	}
 
 	// mount the filesystem
