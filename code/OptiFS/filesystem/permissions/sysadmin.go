@@ -101,6 +101,7 @@ func SetSysadmin() error {
 
 }
 
+// checks if the user is the sysadmin of the system, or is in the same sysadmin group
 func IsUserSysadmin() bool {
 	user, err := user.Current() // get the current user
 	if err != nil {
@@ -121,8 +122,61 @@ func IsUserSysadmin() bool {
 
 	// if they have the same UID or are in the same group (sysadmin group)
 	if uint32(userUID) == SysAdmin.UID || uint32(userGID) == SysAdmin.GID {
+		log.Printf("Current Sysadmin: %+v\nYou are: %v, %v\n", SysAdmin, userUID, userGID)
 		return true
 	}
 
+	log.Printf("Current Sysadmin: %+v\nYou are: %v, %v\n", SysAdmin, userUID, userGID)
+
 	return false
+}
+
+// checker function, if the UID is valid returns true, else false
+func ValidUID(uid string) bool {
+	_, err := user.LookupId(uid)
+	return err == nil
+}
+
+// checker function, if the GID is valid returns true, else false
+func ValidGID(gid string) bool {
+	_, err := user.LookupGroupId(gid)
+	return err == nil
+}
+
+// change the sysadmin UID (if specified)
+// it is checked before this function is called that the person calling it is a current sysadmin
+func ChangeSysadminUID(uid string) error {
+	if !ValidUID(uid) {
+		log.Fatalf("UID is NOT valid: %v\n", uid)
+	}
+
+	// extract userID
+	newUid, conversionErr := strconv.Atoi(uid)
+	if conversionErr != nil {
+		log.Fatalf("Couldn't get new UID!: %v\n", conversionErr)
+	}
+	SysAdmin.UID = uint32(newUid) // set new UID
+	PrintSysadminInfo()
+
+	return nil
+
+}
+
+// change the group of the sysadmin (if specified)
+// it is checked before this function is called that the person calling it is a current sysadmin
+func ChangeSysadminGID(gid string) error {
+	if !ValidUID(gid) {
+		log.Fatalf("UID is NOT valid: %v\n", gid)
+	}
+
+	// extract userID
+	newGid, conversionErr := strconv.Atoi(gid)
+	if conversionErr != nil {
+		log.Fatalf("Couldn't get new GID!: %v\n", conversionErr)
+	}
+	SysAdmin.GID = uint32(newGid) // set new GID
+	PrintSysadminInfo()
+
+	return nil
+
 }

@@ -10,7 +10,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
@@ -21,6 +20,8 @@ func main() {
 	debug := flag.Bool("debug", false, "enter debug mode")
 	removePersistence := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
 	disableIntegrityCheck := flag.Bool("disable-icheck", false, "disables the integrity check of the persistent data of the filesystem")
+	changeSysadminUID := flag.String("change-sysadmin-uid", "", "changes the sysadmin (through UID) of the system")
+	changeSysadminGID := flag.String("change-sysadmin-gid", "", "changes the sysadmin group of the system")
 
 	flag.Parse() // parse arguments
 	if flag.NArg() < 2 {
@@ -31,10 +32,10 @@ func main() {
 	}
 
 	under, err := filepath.Abs(flag.Arg(1))
-    if err != nil {
-        log.Println("Couldn't get absolute path for underlying filesystem!")
-        return 
-    }
+	if err != nil {
+		log.Println("Couldn't get absolute path for underlying filesystem!")
+		return
+	}
 	data := &vfs.OptiFSRoot{
 		Path: under,
 	}
@@ -50,13 +51,27 @@ func main() {
 		RootNode: data,
 	}
 
-    if !(*removePersistence) {
-        permissions.RetrieveSysadmin()
-    }
+	if !(*removePersistence) {
+		permissions.RetrieveSysadmin()
+	}
 
-	// if there is no sysadmin, ser the current user as the sysadmin
+	// if there is no sysadmin, set the current user as the sysadmin
 	if !permissions.SysAdmin.Set {
 		permissions.SetSysadmin()
+	} else if !permissions.IsUserSysadmin() {
+		log.Fatal("You cannot run this OptiFS instance: not a sysadmin.")
+	}
+
+	// The user wishes to change the sysadmin UID/GID
+	if *changeSysadminUID != "" {
+		permissions.ChangeSysadminUID(*changeSysadminUID)
+		permissions.SaveSysadmin() // save the changes
+		return
+	}
+	if *changeSysadminGID != "" {
+		permissions.ChangeSysadminGID(*changeSysadminGID)
+		permissions.SaveSysadmin() // save the changes
+		return
 	}
 
 	// mount the filesystem
