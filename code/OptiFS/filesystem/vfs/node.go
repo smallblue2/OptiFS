@@ -985,7 +985,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 		log.Printf("Scanned for old metadata - %v\n", err1)
 
 		// Check to see if it's unique
-		isUnique, _ := metadata.IsContentHashUnique(newHash)
+		isUnique := metadata.IsContentHashUnique(newHash)
 		log.Printf("Is unique: {%v}\n", isUnique)
 
 		// If it's unique - CREATE a new MapEntry
