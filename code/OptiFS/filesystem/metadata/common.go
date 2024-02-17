@@ -3,6 +3,7 @@
 package metadata
 
 import (
+	"bytes"
 	"log"
 	"syscall"
 
@@ -22,10 +23,6 @@ func updateAllFromStat(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t,
 
     // Save the path here for dedup purposes
     (*metadata).Path = path
-
-    // Take these from our stable attributes
-    (*metadata).Ino = (*stableAttr).Ino
-    (*metadata).Gen = (*stableAttr).Gen
 
 	log.Printf("New Mode: 0x%X\n", (*stableAttr).Mode)
 	// Take these from our stable attributes
@@ -61,7 +58,7 @@ func GetCustomXAttr(customMetadata *MapEntryMetadata, attr string , dest *[]byte
 
     if customMetadata == nil || customMetadata.XAttr == nil {
         log.Println("No custom metadata or XAttr available!")
-        return 0, fs.ToErrno(syscall.EIO) // Internal error or uninitialized structure
+        return 0, fs.ToErrno(syscall.ENODATA) // Internal error or uninitialized structure
     }
 
     // Ensure to get the correct lock
@@ -173,9 +170,13 @@ func RemoveCustomXAttr(customMetadata *MapEntryMetadata, attr string, isDir bool
 }
 
 func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool) (uint32, syscall.Errno) {
-    if customMetadata == nil || customMetadata.XAttr == nil {
+    if customMetadata == nil || customMetadata.XAttr == nil { 
         log.Println("No custom metadata or XAttr available!")
         return 0, fs.ToErrno(syscall.EIO)
+    }
+
+    if len(customMetadata.XAttr) == 0 {
+        return 0, fs.OK
     }
 
     // Lock handling remains the same...
@@ -191,30 +192,22 @@ func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool)
     }
     log.Println("Obtained lock")
 
+    var tempBuffer bytes.Buffer
     var totalSizeNeeded uint32
-    // First, calculate the total size needed for all attributes including null terminators.
+
     for attrName := range customMetadata.XAttr {
-        totalSizeNeeded += uint32(len(attrName)) + 1 // +1 for the null terminator
+        log.Printf("Attribute Name: %s, Length: %d", attrName, len(attrName))
+        totalSizeNeeded += uint32(len(attrName)) + 1 // For the attribute name and the null terminator
+        tempBuffer.WriteString(attrName)
+        tempBuffer.WriteByte(0) // Null terminator
     }
 
-    // Now, check if the provided buffer (*dest) is large enough to hold all attributes.
-    if totalSizeNeeded > uint32(len(*dest)) {
-        // If not, return the total size needed and ERANGE error to indicate the buffer is too small.
-        log.Println("Buffer too small!")
+    log.Printf("Calculated size: %d", totalSizeNeeded) // Debugging 
+
+    if uint32(len(*dest)) < totalSizeNeeded {
         return totalSizeNeeded, fs.ToErrno(syscall.ERANGE)
     }
-    log.Println("Buffer is big enough")
 
-    // If the buffer is large enough, proceed to append attribute names with null terminators.
-    var actualSize uint32
-    for attrName := range customMetadata.XAttr {
-        log.Printf("Filling {%v}\n", attrName)
-        attrBytesWithNull := append([]byte(attrName), 0) // Convert and append null terminator
-        *dest = append(*dest, attrBytesWithNull...)
-        actualSize += uint32(len(attrBytesWithNull))
-        log.Printf("Updated, size: {%v}\n", actualSize)
-    }
-
-    // Return the actual size used in the buffer, which should match totalSizeNeeded.
-    return actualSize, fs.OK
+    copy(*dest, tempBuffer.Bytes())
+    return totalSizeNeeded, fs.OK 
 }
