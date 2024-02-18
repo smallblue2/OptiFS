@@ -17,12 +17,13 @@ type Sysadmin struct {
 var SysAdmin Sysadmin
 
 // save the sysadmin details when the system shuts down
-func SaveSysadmin() error {
-	dest := "permissions/OptiFSSysadminSave.gob"
-
+func SaveSysadmin(dest string) error {
 	// create the file if it doesn't exist, truncate it if it does
 	// we assume nobody will be calling this file, as it is a very unique name
-	file, err := os.Create(dest)
+	test := dest + "/OptiFSSysadminSave.gob"
+	log.Printf("Saving sysadmin info here: %v\n", test)
+
+	file, err := os.Create(dest + "/OptiFSSysadminSave.gob")
 
 	if err != nil {
 		log.Println("ERROR WITH FILE - SYSADMIN")
@@ -44,10 +45,8 @@ func SaveSysadmin() error {
 }
 
 // retrieve the sysadmin details when the system boots up
-func RetrieveSysadmin() error {
-	dest := "permissions/OptiFSSysadminSave.gob"
-
-	file, err := os.Open(dest) // open where the info was encoded
+func RetrieveSysadmin(dest string) error {
+	file, err := os.Open(dest + "/OptiFSSysadminSave.gob") // open where the info was encoded
 
 	if err != nil {
 		return err

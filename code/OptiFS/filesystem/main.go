@@ -19,6 +19,7 @@ func main() {
 	log.SetFlags(log.Lmicroseconds)
 	debug := flag.Bool("debug", false, "enter debug mode")
 	removePersistence := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
+	saveLocation := flag.String("save", "", "choose the location of saved hashmaps and sysadmin info")
 	disableIntegrityCheck := flag.Bool("disable-icheck", false, "disables the integrity check of the persistent data of the filesystem")
 	changeSysadminUID := flag.String("change-sysadmin-uid", "", "changes the sysadmin (through UID) of the system")
 	changeSysadminGID := flag.String("change-sysadmin-gid", "", "changes the sysadmin group of the system")
@@ -51,8 +52,17 @@ func main() {
 		RootNode: data,
 	}
 
+	var dest string
+	// if they have chosen a location to save hashmaps and sysadmin info
+	if *saveLocation != "" {
+		dest = *saveLocation
+	} else {
+		dest = under + "/../save"
+		os.MkdirAll(dest, 0700) // make the directory "save" if it doesn't exist
+	}
+
 	if !(*removePersistence) {
-		permissions.RetrieveSysadmin()
+		permissions.RetrieveSysadmin(dest)
 	}
 
 	// if there is no sysadmin, set the current user as the sysadmin
@@ -65,12 +75,12 @@ func main() {
 	// The user wishes to change the sysadmin UID/GID
 	if *changeSysadminUID != "" {
 		permissions.ChangeSysadminUID(*changeSysadminUID)
-		permissions.SaveSysadmin() // save the changes
+		permissions.SaveSysadmin(dest) // save the changes
 		return
 	}
 	if *changeSysadminGID != "" {
 		permissions.ChangeSysadminGID(*changeSysadminGID)
-		permissions.SaveSysadmin() // save the changes
+		permissions.SaveSysadmin(dest) // save the changes
 		return
 	}
 
@@ -81,8 +91,8 @@ func main() {
 	}
 
 	if !(*removePersistence) {
-		metadata.RetrievePersistantStorage() // retrieve the hashmaps
-		permissions.RetrieveSysadmin()       // retrieve sysadmin info
+		metadata.RetrievePersistantStorage(dest) // retrieve the hashmaps
+		permissions.RetrieveSysadmin(dest)       // retrieve sysadmin info
 		// print for debugging purposes
 		metadata.PrintRegularFileMetadataHash()
 		metadata.PrintDirMetadataHash()
@@ -104,8 +114,8 @@ func main() {
 
 	if !(*removePersistence) {
 		defer func() {
-			metadata.SavePersistantStorage()
-			permissions.SaveSysadmin()
+			metadata.SavePersistantStorage(dest)
+			permissions.SaveSysadmin(dest)
 			// print for debugging purposes
 			metadata.PrintRegularFileMetadataHash()
 			metadata.PrintDirMetadataHash()
