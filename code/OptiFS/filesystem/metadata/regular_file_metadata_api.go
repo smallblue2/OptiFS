@@ -12,13 +12,13 @@ import (
 
 // Performs a lookup on the regularFileMetadataHash to tell if the provided content hash is unique.
 //
-// Returns a bool for whether the contentHash can be found and also returns the underlying Inode
-func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
+// Returns a bool for whether the contentHash can be found
+func IsContentHashUnique(contentHash [64]byte) bool {
 
 	// If it's an empty file, just state it's unique
 	var defaultHash [64]byte
 	if contentHash == defaultHash {
-		return true, 0
+		return true
 	}
 
 	// needs a read lock as data is not being modified, only read, so multiple
@@ -27,20 +27,17 @@ func IsContentHashUnique(contentHash [64]byte) (bool, uint32) {
 	defer metadataMutex.RUnlock()
 
 	// Check to see if there's an entry for the contentHash and refNum above
-	entry, exists := regularFileMetadataHash[contentHash]
+	_, exists := regularFileMetadataHash[contentHash]
 	// If it doesn't exist
 	if !exists {
 		log.Println("Content is unique!")
-		return !exists, 0 // TODO: return the underlying node OR get rid of it
+		return !exists
 	}
 
 	// If it exists, return the underlying Inode
 	log.Println("Content isn't unique!")
-	//log.Printf("HASH MATCHES {%+v}\n", entry.EntryList[0])
-	//log.Printf("Hash: {%+v}\n", contentHash)
-	//PrintRegularFileMetadataHash()
 
-	return !exists, entry.UnderlyingInode
+	return !exists
 }
 
 // Gets the most recent entry in a MapEntry
