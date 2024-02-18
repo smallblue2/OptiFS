@@ -916,50 +916,50 @@ func TestRetrieveNodeInfo(t *testing.T) {
 		{
 			name: "Retrieve entry",
 			path: "test/file1",
-            mockMap: map[string]*NodeInfo{
-                "test/file1": {
-                    StableIno: 123,
-                    StableGen: 1,
-                    StableMode: 0644,
-                    Mode: 123,
-                    IsDir: false,
-                    ContentHash: blake3Hash([]byte{1,2,3,4}),
-                    RefNum: 32,
-                },
-                "test/file2": {},
-            },
-            exStIno: 123,
-            exStGen: 1,
-            exStMode: 0644,
-            exMode: 123,
-            exIsDir: false,
-            exHash: blake3Hash([]byte{1,2,3,4}),
-            exRefNum: 32,
-            expectedError: fs.OK,
+			mockMap: map[string]*NodeInfo{
+				"test/file1": {
+					StableIno:   123,
+					StableGen:   1,
+					StableMode:  0644,
+					Mode:        123,
+					IsDir:       false,
+					ContentHash: blake3Hash([]byte{1, 2, 3, 4}),
+					RefNum:      32,
+				},
+				"test/file2": {},
+			},
+			exStIno:       123,
+			exStGen:       1,
+			exStMode:      0644,
+			exMode:        123,
+			exIsDir:       false,
+			exHash:        blake3Hash([]byte{1, 2, 3, 4}),
+			exRefNum:      32,
+			expectedError: fs.OK,
 		},
 		{
 			name: "No entry exists",
 			path: "test/file4",
-            mockMap: map[string]*NodeInfo{
-                "test/file1": {
-                    StableIno: 123,
-                    StableGen: 1,
-                    StableMode: 0644,
-                    Mode: 123,
-                    IsDir: false,
-                    ContentHash: blake3Hash([]byte{1,2,3,4}),
-                    RefNum: 32,
-                },
-                "test/file2": {},
-            },
-            exStIno: 0,
-            exStGen: 0,
-            exStMode: 0,
-            exMode: 0,
-            exIsDir: false,
-            exHash: [64]byte{},
-            exRefNum: 0,
-            expectedError: fs.ToErrno(syscall.ENODATA),
+			mockMap: map[string]*NodeInfo{
+				"test/file1": {
+					StableIno:   123,
+					StableGen:   1,
+					StableMode:  0644,
+					Mode:        123,
+					IsDir:       false,
+					ContentHash: blake3Hash([]byte{1, 2, 3, 4}),
+					RefNum:      32,
+				},
+				"test/file2": {},
+			},
+			exStIno:       0,
+			exStGen:       0,
+			exStMode:      0,
+			exMode:        0,
+			exIsDir:       false,
+			exHash:        [64]byte{},
+			exRefNum:      0,
+			expectedError: fs.ToErrno(syscall.ENODATA),
 		},
 	}
 
@@ -968,32 +968,32 @@ func TestRetrieveNodeInfo(t *testing.T) {
 			// Redeclare nodePersistenceHash dependency
 			nodePersistenceHash = tc.mockMap
 
-            err, stIno, stMode, stGen, Mode, isDir, hash, ref := RetrieveNodeInfo(tc.path)
+			err, stIno, stMode, stGen, Mode, isDir, hash, ref := RetrieveNodeInfo(tc.path)
 
-            if err != tc.expectedError {
-                t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
-            }
-            if stIno != tc.exStIno {
-                t.Errorf("Expected %v, got %v\n", tc.exStIno, stIno)
-            }
-            if stMode != tc.exStMode {
-                t.Errorf("Expected %v, got %v\n", tc.exStMode, stMode)
-            }
-            if stGen != tc.exStGen {
-                t.Errorf("Expected %v, got %v\n", tc.exStGen, stGen)
-            }
-            if Mode != tc.exMode {
-                t.Errorf("Expected %v, got %v\n", tc.exMode, Mode)
-            }
-            if isDir != tc.exIsDir {
-                t.Errorf("Expected %v, got %v\n", tc.exIsDir, isDir)
-            }
-            if hash != tc.exHash {
-                t.Errorf("Expected %v, got %v\n", tc.exHash, hash)
-            }
-            if ref != tc.exRefNum {
-                t.Errorf("Expected %v, got %v\n", tc.exRefNum, ref)
-            }
+			if err != tc.expectedError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+			}
+			if stIno != tc.exStIno {
+				t.Errorf("Expected %v, got %v\n", tc.exStIno, stIno)
+			}
+			if stMode != tc.exStMode {
+				t.Errorf("Expected %v, got %v\n", tc.exStMode, stMode)
+			}
+			if stGen != tc.exStGen {
+				t.Errorf("Expected %v, got %v\n", tc.exStGen, stGen)
+			}
+			if Mode != tc.exMode {
+				t.Errorf("Expected %v, got %v\n", tc.exMode, Mode)
+			}
+			if isDir != tc.exIsDir {
+				t.Errorf("Expected %v, got %v\n", tc.exIsDir, isDir)
+			}
+			if hash != tc.exHash {
+				t.Errorf("Expected %v, got %v\n", tc.exHash, hash)
+			}
+			if ref != tc.exRefNum {
+				t.Errorf("Expected %v, got %v\n", tc.exRefNum, ref)
+			}
 
 		})
 	}
