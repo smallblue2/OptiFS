@@ -2,10 +2,12 @@ package metadata
 
 import (
 	"bytes"
+	"reflect"
 	"syscall"
 	"testing"
 
 	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"lukechampine.com/blake3"
 )
 
@@ -289,28 +291,28 @@ func TestRemoveCustomXAttr(t *testing.T) {
 // Unit test for ListCustomXAttr
 func TestListCustomXAttr(t *testing.T) {
 	testCases := []struct {
-		name        string
-		metadata    *MapEntryMetadata
-		bufferSize  int // Size of the provided `dest` buffer
-		expectedErr syscall.Errno
-		expectedLen uint32
-        expectedDest string
+		name         string
+		metadata     *MapEntryMetadata
+		bufferSize   int // Size of the provided `dest` buffer
+		expectedErr  syscall.Errno
+		expectedLen  uint32
+		expectedDest string
 	}{
 		{
-			name:        "nil metadata",
-			metadata:    nil,
-			bufferSize:  100,
-			expectedErr: fs.ToErrno(syscall.EIO),
-			expectedLen: 0,
-            expectedDest: "",
+			name:         "nil metadata",
+			metadata:     nil,
+			bufferSize:   100,
+			expectedErr:  fs.ToErrno(syscall.EIO),
+			expectedLen:  0,
+			expectedDest: "",
 		},
 		{
-			name:        "empty xattrs",
-			metadata:    &MapEntryMetadata{XAttr: map[string][]byte{}},
-			bufferSize:  50,
-			expectedErr: fs.OK,
-			expectedLen: 0,
-            expectedDest: "",
+			name:         "empty xattrs",
+			metadata:     &MapEntryMetadata{XAttr: map[string][]byte{}},
+			bufferSize:   50,
+			expectedErr:  fs.OK,
+			expectedLen:  0,
+			expectedDest: "",
 		},
 		{
 			name: "buffer too small",
@@ -320,10 +322,10 @@ func TestListCustomXAttr(t *testing.T) {
 					"longAttributeName": nil,
 				},
 			},
-			bufferSize:  5,
-			expectedErr: fs.ToErrno(syscall.ERANGE),
-			expectedLen: 24, // Total length needed including null terminators
-            expectedDest: "",
+			bufferSize:   5,
+			expectedErr:  fs.ToErrno(syscall.ERANGE),
+			expectedLen:  24, // Total length needed including null terminators
+			expectedDest: "",
 		},
 		{
 			name: "success - listing",
@@ -334,10 +336,10 @@ func TestListCustomXAttr(t *testing.T) {
 					"foo":    nil,
 				},
 			},
-			bufferSize:  20,
-			expectedErr: fs.OK,
-			expectedLen: 16,
-            expectedDest: "foo\x00test\x00xattr1\x00",
+			bufferSize:   20,
+			expectedErr:  fs.OK,
+			expectedLen:  16,
+			expectedDest: "foo\x00test\x00xattr1\x00",
 		},
 	}
 
@@ -408,6 +410,591 @@ func TestIsContentHashUnique(t *testing.T) {
 			if result != tc.expectedReturnValue {
 				t.Errorf("Expected %v, got %v", tc.expectedReturnValue, result)
 			}
+		})
+	}
+}
+
+// Unit test for IsContentHashUnique function in regular_file_metadata_api.go
+func TestCreateDirEntry(t *testing.T) {
+	testCases := []struct {
+		name                string
+		inputPath           string
+		mockHashMap         map[string]*MapEntryMetadata // Simulated dependency
+		expectedReturnValue *MapEntryMetadata
+	}{
+		{
+			name:                "Normal input",
+			inputPath:           "test/directory",
+			mockHashMap:         map[string]*MapEntryMetadata{},
+			expectedReturnValue: &MapEntryMetadata{},
+		},
+		{
+			name:      "Existing input",
+			inputPath: "test/directory",
+			mockHashMap: map[string]*MapEntryMetadata{
+				"test/directory": {Ino: 12}},
+			expectedReturnValue: &MapEntryMetadata{XAttr: map[string][]byte{}},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Replace regularFileMetadataHash with the mock version during the test
+			dirMetadataHash = tc.mockHashMap
+
+			result := CreateDirEntry(tc.inputPath)
+
+			compareMetadata(t, &MapEntryMetadata{}, result)
+			compareMetadata(t, &MapEntryMetadata{}, dirMetadataHash[tc.inputPath])
+		})
+	}
+}
+
+// Unit test for LookupDirMetadata in directory_metadata_api.go
+func TestLookupDirMetadata(t *testing.T) {
+	testCases := []struct {
+		name                string
+		inputPath           string
+		mockHashMap         map[string]*MapEntryMetadata // Simulated dependency
+		expectedReturnValue *MapEntryMetadata
+		expectedReturnError syscall.Errno
+	}{
+		{
+			name:      "Existing lookup",
+			inputPath: "test/directory",
+			mockHashMap: map[string]*MapEntryMetadata{
+				"test/directory":     {},
+				"other/random/place": {}},
+			expectedReturnValue: &MapEntryMetadata{},
+			expectedReturnError: 0,
+		},
+		{
+			name:      "Non-existing lookup",
+			inputPath: "test/directory",
+			mockHashMap: map[string]*MapEntryMetadata{
+				"random/other": {}},
+			expectedReturnValue: nil,
+			expectedReturnError: fs.ToErrno(syscall.ENODATA),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Replace regularFileMetadataHash with the mock version during the test
+			dirMetadataHash = tc.mockHashMap
+
+			err, result := LookupDirMetadata(tc.inputPath)
+
+			if err != tc.expectedReturnError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedReturnError, err)
+			}
+			if err == 0 {
+				if result == nil {
+					t.Errorf("Expected %v, got %v\n", tc.expectedReturnValue, result)
+				}
+			}
+		})
+	}
+}
+
+// Unit test for UpdateDirEntry in directory_metadata_api.go
+func TestUpdateDirEntry(t *testing.T) {
+	testCases := []struct {
+		name                string
+		inputPath           string
+		mockHashMap         map[string]*MapEntryMetadata // Simulated dependency
+		mockStable          *fs.StableAttr
+		mockUnstable        *syscall.Stat_t
+		expectedReturnValue *MapEntryMetadata
+		expectedReturnError syscall.Errno
+	}{
+		// Existing entry and succesful update
+		{
+			name:      "Succesful update",
+			inputPath: "foo/bar",
+			mockHashMap: map[string]*MapEntryMetadata{
+				"foo/bar":                    {},
+				"another/one":                {},
+				"hello":                      {},
+				"this/is/a/longer/directory": {},
+			},
+			mockStable:          &fs.StableAttr{Gen: 12, Ino: 12345, Mode: 5323},
+			mockUnstable:        &syscall.Stat_t{Ino: 54321, Dev: 3, Mode: 4321, Uid: 1000, Gid: 1000, Rdev: 21, Size: 3454322, Atim: syscall.NsecToTimespec(1232), Mtim: syscall.NsecToTimespec(4322), Ctim: syscall.NsecToTimespec(1), Nlink: 2, Blocks: 12, Blksize: 5432, X__pad0: 12, X__unused: [3]int64{1, 2, 3}},
+			expectedReturnError: 0,
+		},
+		// Entry doesn't exist
+		{
+			name:      "Entry doesn't exist",
+			inputPath: "hello/world",
+			mockHashMap: map[string]*MapEntryMetadata{
+				"foo/bar":                    {},
+				"another/one":                {},
+				"hello":                      {},
+				"this/is/a/longer/directory": {},
+			},
+			mockStable:          &fs.StableAttr{},
+			mockUnstable:        &syscall.Stat_t{},
+			expectedReturnValue: &MapEntryMetadata{},
+			expectedReturnError: fs.ToErrno(syscall.ENODATA),
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Replace regularFileMetadataHash with the mock version during the test
+			dirMetadataHash = tc.mockHashMap
+
+			err := UpdateDirEntry(tc.inputPath, tc.mockUnstable, tc.mockStable)
+
+			if err != tc.expectedReturnError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedReturnError, err)
+			}
+			if err == 0 {
+				expected := generateExpectedMetadata(tc.mockUnstable, tc.mockStable, tc.inputPath)
+				compareMetadata(t, expected, dirMetadataHash[tc.inputPath])
+			}
+		})
+	}
+}
+
+// Unit test for RemoveDirEntry in directory_metadata_api.go
+func TestRemoveDirEntry(t *testing.T) {
+	testCases := []struct {
+		name          string
+		inputPath     string
+		mockHashMap   map[string]*MapEntryMetadata
+		expectedState map[string]*MapEntryMetadata // State of hashmap after RemoveDirEntry
+	}{
+		{
+			name:          "Entry Exists",
+			inputPath:     "test/path",
+			mockHashMap:   map[string]*MapEntryMetadata{"test/path": {}},
+			expectedState: map[string]*MapEntryMetadata{}, // Entry should be removed
+		},
+		{
+			name:          "Entry Does Not Exist",
+			inputPath:     "test/missing",
+			mockHashMap:   map[string]*MapEntryMetadata{"other/path": {}},
+			expectedState: map[string]*MapEntryMetadata{"other/path": {}}, // No change expected
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dirMetadataHash = tc.mockHashMap
+
+			RemoveDirEntry(tc.inputPath)
+
+			// Assertion: Using reflect.DeepEqual for map comparison
+			if !reflect.DeepEqual(dirMetadataHash, tc.expectedState) {
+				t.Errorf("Hashmap state mismatch!\nExpected: %v\nGot: %v", tc.expectedState, dirMetadataHash)
+			}
+		})
+	}
+}
+
+// Unit test for FillAttr in general_api.go
+func TestFillAttr(t *testing.T) {
+	testCases := []struct {
+		name          string
+		inputMetadata *MapEntryMetadata
+		expectedAttr  fuse.Attr
+	}{
+		{
+			name: "Typical Data Transfer",
+			inputMetadata: &MapEntryMetadata{
+				Ino:     12345,
+				Size:    4096,
+				Blocks:  8,
+				Atim:    syscall.Timespec{Sec: 1679009770, Nsec: 62539149},
+				Mtim:    syscall.Timespec{Sec: 1679009775, Nsec: 869650321},
+				Ctim:    syscall.Timespec{Sec: 1679009772, Nsec: 797906618},
+				Mode:    0755,
+				Nlink:   2,
+				Uid:     1000,
+				Gid:     1000,
+				Rdev:    0,
+				Blksize: 512,
+				// Add any other relevant fields
+			},
+			expectedAttr: fuse.Attr{
+				Ino:       12345,
+				Size:      4096,
+				Blocks:    8,
+				Atime:     1679009770,
+				Atimensec: 62539149,
+				Mtime:     1679009775,
+				Mtimensec: 869650321,
+				Ctime:     1679009772,
+				Ctimensec: 797906618,
+				Mode:      0755,
+				Nlink:     2,
+				Owner:     fuse.Owner{Uid: 1000, Gid: 1000},
+				Rdev:      0,
+				Blksize:   512,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actualAttr := fuse.Attr{}
+
+			FillAttr(tc.inputMetadata, &actualAttr)
+
+			if !reflect.DeepEqual(actualAttr, tc.expectedAttr) {
+				t.Errorf("Incorrect attribute filling. Expected: %+v, Got: %+v", tc.expectedAttr, actualAttr)
+			}
+		})
+	}
+}
+
+// Unit test for FillAttrOut in general_api.go
+func TestFillAttrOut(t *testing.T) {
+	testCases := []struct {
+		name          string
+		inputMetadata *MapEntryMetadata
+		expectedAttr  fuse.AttrOut
+	}{
+		{
+			name: "Typical Data Transfer",
+			inputMetadata: &MapEntryMetadata{
+				Ino:     12345,
+				Size:    4096,
+				Blocks:  8,
+				Atim:    syscall.Timespec{Sec: 1679009770, Nsec: 62539149},
+				Mtim:    syscall.Timespec{Sec: 1679009775, Nsec: 869650321},
+				Ctim:    syscall.Timespec{Sec: 1679009772, Nsec: 797906618},
+				Mode:    0755,
+				Nlink:   2,
+				Uid:     1000,
+				Gid:     1000,
+				Rdev:    0,
+				Blksize: 512,
+				// Add any other relevant fields
+			},
+			expectedAttr: fuse.AttrOut{
+				Attr: fuse.Attr{
+					Ino:       12345,
+					Size:      4096,
+					Blocks:    8,
+					Atime:     1679009770,
+					Atimensec: 62539149,
+					Mtime:     1679009775,
+					Mtimensec: 869650321,
+					Ctime:     1679009772,
+					Ctimensec: 797906618,
+					Mode:      0755,
+					Nlink:     2,
+					Owner:     fuse.Owner{Uid: 1000, Gid: 1000},
+					Rdev:      0,
+					Blksize:   512,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actualAttr := fuse.AttrOut{}
+
+			FillAttrOut(tc.inputMetadata, &actualAttr)
+
+			if !reflect.DeepEqual(actualAttr, tc.expectedAttr) {
+				t.Errorf("Incorrect attribute filling. Expected: %+v, Got: %+v", tc.expectedAttr, actualAttr)
+			}
+		})
+	}
+}
+
+// Unit tests for StoreRegFileInfo in persistence_api.go
+func TestStoreRegFileInfo(t *testing.T) {
+	testCases := []struct {
+		name          string
+		path          string
+		stableAttr    *fs.StableAttr
+		mode          uint32
+		contentHash   [64]byte
+		refNum        uint64
+		expectedState map[string]*NodeInfo
+	}{
+		{
+			name: "New Entry",
+			path: "test/file1",
+			stableAttr: &fs.StableAttr{
+				Gen:  12345,
+				Ino:  56789,
+				Mode: 0644,
+			},
+			mode:        0644,
+			contentHash: blake3Hash([]byte{1, 2, 3, 4}),
+			refNum:      1,
+			expectedState: map[string]*NodeInfo{
+				"test/file1": {
+					StableGen:   12345,
+					StableIno:   56789,
+					StableMode:  0644,
+					Mode:        0644,
+					IsDir:       false,
+					ContentHash: blake3Hash([]byte{1, 2, 3, 4}),
+					RefNum:      1,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Redeclare nodePersistenceHash dependency
+			nodePersistenceHash = make(map[string]*NodeInfo)
+
+			StoreRegFileInfo(tc.path, tc.stableAttr, tc.mode, tc.contentHash, tc.refNum)
+
+			if !reflect.DeepEqual(nodePersistenceHash, tc.expectedState) {
+				t.Errorf("Incorrect hashmap state!\nExpected: %+v\nGot: %+v", tc.expectedState, nodePersistenceHash)
+			}
+		})
+	}
+}
+
+// Unit tests for StoreDirInfo in persistence_api.go
+func TestStoreDirInfo(t *testing.T) {
+	testCases := []struct {
+		name          string
+		path          string
+		stableAttr    *fs.StableAttr
+		mode          uint32
+		expectedState map[string]*NodeInfo
+	}{
+		{
+			name: "New Entry",
+			path: "test/file1",
+			stableAttr: &fs.StableAttr{
+				Gen:  12345,
+				Ino:  56789,
+				Mode: 0644,
+			},
+			mode: 0644,
+			expectedState: map[string]*NodeInfo{
+				"test/file1": {
+					StableGen:   12345,
+					StableIno:   56789,
+					StableMode:  0644,
+					Mode:        0644,
+					IsDir:       true,
+					ContentHash: [64]byte{},
+					RefNum:      0,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Redeclare nodePersistenceHash dependency
+			nodePersistenceHash = make(map[string]*NodeInfo)
+
+			StoreDirInfo(tc.path, tc.stableAttr, tc.mode)
+
+			if !reflect.DeepEqual(nodePersistenceHash, tc.expectedState) {
+				t.Errorf("Incorrect hashmap state!\nExpected: %+v\nGot: %+v", tc.expectedState, nodePersistenceHash)
+			}
+		})
+	}
+}
+
+// Helper functions to create optional value pointers
+func boolPtr(b bool) *bool         { return &b }
+func modePtr(i uint32) *uint32     { return &i }
+func hashPtr(h [64]byte) *[64]byte { return &h }
+func refPtr(r uint64) *uint64      { return &r }
+
+// Unit test for UpdateNodeInfo in persistence_api.go
+func TestUpdateNodeInfo(t *testing.T) {
+	testCases := []struct {
+		name          string
+		path          string
+		initialData   *NodeInfo // Data initially in nodePersistenceHash
+		isDir         *bool
+		stableAttr    *fs.StableAttr
+		mode          *uint32
+		contentHash   *[64]byte
+		refNum        *uint64
+		expectedState *NodeInfo
+	}{
+		{
+			name: "Update IsDir Flag",
+			path: "test/file",
+			initialData: &NodeInfo{
+				IsDir: false,
+				// ... other initial fields ...
+			},
+			isDir: boolPtr(true), // Helper - converts bool to a pointer
+			expectedState: &NodeInfo{
+				IsDir: true,
+				// ... other initial fields should remain unchanged ...
+			},
+		},
+		{
+			name:        "Update Stable Attributes",
+			path:        "test/dir",
+			initialData: &NodeInfo{ /* Existing values */ },
+			stableAttr:  &fs.StableAttr{Gen: 54321, Ino: 98765, Mode: 0666},
+			expectedState: &NodeInfo{
+				StableGen:  54321,
+				StableIno:  98765,
+				StableMode: 0666,
+			},
+		},
+		{
+			name:        "Update Mode",
+			path:        "test/dir",
+			initialData: &NodeInfo{ /* Existing values */ },
+			mode:        modePtr(644),
+			expectedState: &NodeInfo{
+				Mode: 644,
+			},
+		},
+		{
+			name:        "Update Hash and Refnum",
+			path:        "test/dir",
+			initialData: &NodeInfo{ /* Existing values */ },
+			contentHash: hashPtr(blake3Hash([]byte{1, 2, 3, 4})),
+			refNum:      refPtr(5),
+			expectedState: &NodeInfo{
+				ContentHash: blake3Hash([]byte{1, 2, 3, 4}),
+				RefNum:      5,
+			},
+		},
+		{
+			name:          "Path Not Found",
+			path:          "test/missing",
+			initialData:   nil, // Not required when the path is absent
+			expectedState: nil, // Or an empty NodeInfo if your logic creates something
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup
+			nodePersistenceHash = map[string]*NodeInfo{}
+			if tc.initialData != nil {
+				nodePersistenceHash[tc.path] = tc.initialData
+			}
+
+			// Call the function
+			UpdateNodeInfo(tc.path, tc.isDir, tc.stableAttr, tc.mode, tc.contentHash, tc.refNum)
+
+			// Assertion
+			result, exists := nodePersistenceHash[tc.path]
+			if !exists && tc.expectedState == nil {
+				// "Not exists" path and we expected it, success
+				return
+			}
+
+			if !exists || !reflect.DeepEqual(result, tc.expectedState) {
+				t.Errorf("Incorrect update or missing entry!\nExpected: %+v\nGot: %+v", tc.expectedState, result)
+			}
+		})
+	}
+}
+
+// Unit test for RetrieveNodeInfo in persistence.go
+func TestRetrieveNodeInfo(t *testing.T) {
+	testCases := []struct {
+		name          string
+		path          string
+		mockMap       map[string]*NodeInfo
+		expectedError syscall.Errno
+		exStIno       uint64
+		exStMode      uint32
+		exStGen       uint64
+		exMode        uint32
+		exIsDir       bool
+		exHash        [64]byte
+		exRefNum      uint64
+	}{
+		{
+			name: "Retrieve entry",
+			path: "test/file1",
+            mockMap: map[string]*NodeInfo{
+                "test/file1": {
+                    StableIno: 123,
+                    StableGen: 1,
+                    StableMode: 0644,
+                    Mode: 123,
+                    IsDir: false,
+                    ContentHash: blake3Hash([]byte{1,2,3,4}),
+                    RefNum: 32,
+                },
+                "test/file2": {},
+            },
+            exStIno: 123,
+            exStGen: 1,
+            exStMode: 0644,
+            exMode: 123,
+            exIsDir: false,
+            exHash: blake3Hash([]byte{1,2,3,4}),
+            exRefNum: 32,
+            expectedError: fs.OK,
+		},
+		{
+			name: "No entry exists",
+			path: "test/file4",
+            mockMap: map[string]*NodeInfo{
+                "test/file1": {
+                    StableIno: 123,
+                    StableGen: 1,
+                    StableMode: 0644,
+                    Mode: 123,
+                    IsDir: false,
+                    ContentHash: blake3Hash([]byte{1,2,3,4}),
+                    RefNum: 32,
+                },
+                "test/file2": {},
+            },
+            exStIno: 0,
+            exStGen: 0,
+            exStMode: 0,
+            exMode: 0,
+            exIsDir: false,
+            exHash: [64]byte{},
+            exRefNum: 0,
+            expectedError: fs.ToErrno(syscall.ENODATA),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Redeclare nodePersistenceHash dependency
+			nodePersistenceHash = tc.mockMap
+
+            err, stIno, stMode, stGen, Mode, isDir, hash, ref := RetrieveNodeInfo(tc.path)
+
+            if err != tc.expectedError {
+                t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+            }
+            if stIno != tc.exStIno {
+                t.Errorf("Expected %v, got %v\n", tc.exStIno, stIno)
+            }
+            if stMode != tc.exStMode {
+                t.Errorf("Expected %v, got %v\n", tc.exStMode, stMode)
+            }
+            if stGen != tc.exStGen {
+                t.Errorf("Expected %v, got %v\n", tc.exStGen, stGen)
+            }
+            if Mode != tc.exMode {
+                t.Errorf("Expected %v, got %v\n", tc.exMode, Mode)
+            }
+            if isDir != tc.exIsDir {
+                t.Errorf("Expected %v, got %v\n", tc.exIsDir, isDir)
+            }
+            if hash != tc.exHash {
+                t.Errorf("Expected %v, got %v\n", tc.exHash, hash)
+            }
+            if ref != tc.exRefNum {
+                t.Errorf("Expected %v, got %v\n", tc.exRefNum, ref)
+            }
+
 		})
 	}
 }

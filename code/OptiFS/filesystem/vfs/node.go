@@ -217,7 +217,7 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 
 	// Check execute permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
-	if err1 == nil {
+	if err1 == 0 {
 		log.Println("Checking directory custom permissions")
 		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
 		if !isAllowed {
@@ -249,7 +249,7 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 
 	// Check exec permissions if there is custom metadata
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
-	if err1 == nil {
+	if err1 == 0 {
 		log.Println("Checking directory custom permissions")
 		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
 		if !isAllowed {
@@ -275,7 +275,7 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 
 	// Check read permissions if available
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
-	if err1 == nil {
+	if err1 == 0 {
 		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 0)
 		if !isAllowed {
 			return nil, fs.ToErrno(syscall.EACCES)
@@ -295,7 +295,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	// Not sure if attributes carry over node Lookups, check persistent storage to be sure
 	var existingHash [64]byte
 	var existingRef uint64
-	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == nil && !isDir {
+	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == fs.OK && !isDir {
 		existingHash = hash
 		existingRef = ref
 	}
@@ -307,7 +307,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 		return fs.OK
 	}
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == nil {
+	if err2 == 0 {
 		metadata.FillAttrOut(dirMetadata, out)
 		return fs.OK
 	}
@@ -356,7 +356,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 	// Search for persistent hash or ref's
 	log.Println("Searching for persistently stored hash and ref")
-	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath()); err == nil && !isDir {
+	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath()); err == fs.OK && !isDir {
 		existingHash = hash
 		existingRef = ref
 		log.Printf("Found - {%v} - {%+v}\n", existingHash, existingRef)
@@ -376,7 +376,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 	}
 	// Also check to see if we can find an entry in our directory hashmap
 	err2, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err2 == nil {
+	if err2 == 0 {
 		log.Println("Setting attributes for custom directory metadata.")
 		if f != nil {
 			return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, f.(*OptiFSFile), out, isDir))
@@ -404,7 +404,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	// instead of node
 	var existingHash [64]byte
 	var existingRef uint64
-	if err, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == nil {
+	if err, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == fs.OK {
 		log.Println("Persisten hash and ref exists for file")
 		existingHash = hash
 		existingRef = ref
@@ -453,7 +453,7 @@ func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (ui
 	}
 	path := n.RPath()
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == nil {
+	if err2 == 0 {
 		hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
 		if !hasRead {
 			return 0, syscall.EACCES
@@ -488,7 +488,7 @@ func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, fla
 	}
 	path := n.RPath()
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == nil {
+	if err2 == 0 {
 		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
 		if !hasWrite {
 			return syscall.EACCES
@@ -525,7 +525,7 @@ func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno
 	}
 	path := n.RPath()
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == nil {
+	if err2 == 0 {
 		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
 		if !hasWrite {
 			return syscall.EACCES
@@ -559,7 +559,7 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 	}
 	path := n.RPath()
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == nil {
+	if err2 == 0 {
 		hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
 		if !hasRead {
 			return 0, syscall.EACCES
@@ -596,7 +596,7 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 	}
 
 	// Check if custom metadata exists for a directory
-	if err, dirMetadata := metadata.LookupDirMetadata(path); err == nil {
+	if err, dirMetadata := metadata.LookupDirMetadata(path); err == 0 {
 		log.Println("Found custom directory metadata, checking...")
 		isAllowed := permissions.CheckMask(ctx, mask, dirMetadata)
 		if !isAllowed {
@@ -623,7 +623,7 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 
 	// Check write and execute permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err1 == nil {
+	if err1 == 0 {
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
 		if !writePerm {
@@ -692,7 +692,7 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 
 	// Check write and exec permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err1 == nil {
+	if err1 == 0 {
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
 		if !writePerm {
@@ -743,7 +743,7 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 	// Check write and exec permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err1 == nil {
+	if err1 == 0 {
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
 		if !writePerm {
@@ -766,7 +766,7 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	// Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
 	// for custom metadata to cleanup
 	herr, _, _, _, _, _, contentHash, refNum := metadata.RetrieveNodeInfo(filePath)
-	if herr == nil {
+	if herr == fs.OK {
 		// Mark if it exists
 		customExists = true
 	}
@@ -797,7 +797,7 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	// Check exec and write permissions on the parent directory
 	// Don't need to check the directory being removed, as it must be empty to be removed
 	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err1 == nil {
+	if err1 == 0 {
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
 		if !writePerm {
@@ -1208,7 +1208,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 	path := n.RPath()
 	err1, dir1Metadata := metadata.LookupDirMetadata(path)
 	err2, dir2Metadata := metadata.LookupDirMetadata(newParent.EmbeddedInode().Path(nil))
-	if err1 == nil {
+	if err1 == 0 {
 		hasWrite := permissions.CheckPermissions(ctx, dir1Metadata, 1)
 		if !hasWrite {
 			return fs.ToErrno(syscall.EACCES)
@@ -1218,7 +1218,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 			return fs.ToErrno(syscall.EACCES)
 		}
 	}
-	if err2 == nil {
+	if err2 == 0 {
 		hasWrite := permissions.CheckPermissions(ctx, dir2Metadata, 1)
 		if !hasWrite {
 			return fs.ToErrno(syscall.EACCES)
@@ -1235,7 +1235,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 	originalPath := filepath.Join(n.RPath(), name)
 	newPath := filepath.Join(n.RootNode.Path, newParent.EmbeddedInode().Path(nil), newName)
 	lErr, lSIno, lSMode, lSGen, lMode, lIsDir, lHash, lRef := metadata.RetrieveNodeInfo(originalPath)
-	if lErr != nil {
+	if lErr != fs.OK {
 		log.Println("Entry doesn't exist in our persistent store - big error, why doesn't it??")
 		return fs.ToErrno(syscall.ENOENT)
 	}
@@ -1264,7 +1264,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 			// Copy the old metadata over since directory custom metadata is
 			// indexed by path
 			tmpErr, tmpMetadata := metadata.LookupDirMetadata(originalPath)
-			if tmpErr != nil {
+			if tmpErr != 0 {
 				log.Println("PANIC AHHHHH")
 				return returnErr
 			}
@@ -1371,7 +1371,7 @@ func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev ui
 
 	// Check the write and execute permissions of the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
-	if err1 == nil {
+	if err1 == 0 {
 		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
 		if !hasWrite {
 			return nil, fs.ToErrno(syscall.EACCES)
@@ -1416,7 +1416,7 @@ func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name str
 
 	// Check write and execute permissions on the source directory
 	err1, dirMetadata := metadata.LookupDirMetadata(target.EmbeddedInode().Path(nil))
-	if err1 == nil {
+	if err1 == 0 {
 		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
 		if !hasWrite {
 			return nil, fs.ToErrno(syscall.EACCES)

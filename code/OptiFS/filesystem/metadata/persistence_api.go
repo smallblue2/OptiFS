@@ -4,7 +4,6 @@ package metadata
 
 import (
 	"encoding/gob"
-	"errors"
 	"log"
 	"os"
 	"sync"
@@ -72,7 +71,7 @@ func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *u
 }
 
 // Retrieves the content hash and reference number of a node in the nodePersistenceHash
-func RetrieveNodeInfo(path string) (error, uint64, uint32, uint64, uint32, bool, [64]byte, uint64) {
+func RetrieveNodeInfo(path string) (syscall.Errno, uint64, uint32, uint64, uint32, bool, [64]byte, uint64) {
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	nodeMutex.RLock()
@@ -83,10 +82,10 @@ func RetrieveNodeInfo(path string) (error, uint64, uint32, uint64, uint32, bool,
 	info, ok := nodePersistenceHash[path]
 	if !ok {
 		//log.Println("Failed to retrieve node!")
-		return errors.New("No node info available for path"), 0, 0, 0, 0, false, [64]byte{}, 0
+		return fs.ToErrno(syscall.ENODATA), 0, 0, 0, 0, false, [64]byte{}, 0
 	}
 	//log.Println("Retrieved node!")
-	return nil, info.StableIno, info.StableMode, info.StableGen, info.Mode, info.IsDir, info.ContentHash, info.RefNum
+	return fs.OK, info.StableIno, info.StableMode, info.StableGen, info.Mode, info.IsDir, info.ContentHash, info.RefNum
 }
 
 // Removes an entry from the nodePersistenceHash
@@ -391,3 +390,4 @@ func InsureIntegrity() {
 
 	log.Println("FILESYSTEM HEALTHY")
 }
+

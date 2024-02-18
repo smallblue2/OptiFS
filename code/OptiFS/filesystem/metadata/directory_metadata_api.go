@@ -3,7 +3,6 @@
 package metadata
 
 import (
-	"errors"
 	"log"
 	"syscall"
 
@@ -17,13 +16,14 @@ func CreateDirEntry(path string) *MapEntryMetadata {
 	defer dirMutex.Unlock()
 
 	log.Printf("Created a new directory metadata entry for (%v)\n", path)
-	dirMetadataHash[path] = &MapEntryMetadata{}
-	return dirMetadataHash[path]
+    entry := &MapEntryMetadata{XAttr: make(map[string][]byte)}
+	dirMetadataHash[path] = entry
+	return entry
 }
 
 // Performs a lookup for a directory entry in the directoryMetadataHash with
-// the 'ino' being the key
-func LookupDirMetadata(path string) (error, *MapEntryMetadata) {
+// the path being the key
+func LookupDirMetadata(path string) (syscall.Errno, *MapEntryMetadata) {
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	dirMutex.RLock()
@@ -33,15 +33,15 @@ func LookupDirMetadata(path string) (error, *MapEntryMetadata) {
 	metadata, ok := dirMetadataHash[path]
 	if !ok {
 		//log.Println("Couldn't find a custom directory metadata entry")
-		return errors.New("No metadata entry available!"), nil
+		return fs.ToErrno(syscall.ENODATA), nil
 	}
 	//log.Println("Found a custom directory metadata entry")
-	return nil, metadata
+	return 0, metadata
 }
 
 // Updates an entry in the directoryMetadataHash with the full contents of the provided
 // Stat_t object. Will error if there exists no entry for the provided ino.
-func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) error {
+func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr) syscall.Errno {
 	// locks for this function are implemented in the functions being called
 	// done to prevent deadlock
 
@@ -49,7 +49,7 @@ func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t, stableAttr *fs.St
 	// Ensure that contentHash and refNum is valid
 	// this function has locks already!
 	err, metadata := LookupDirMetadata(path)
-	if err != nil {
+	if err != 0 {
 		log.Println("Couldn't find the metadata struct")
 		return err
 	}
@@ -61,7 +61,7 @@ func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t, stableAttr *fs.St
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through lookup")
 
-	return nil
+	return 0
 }
 
 // Deletes an entry in the directoryMetadataHash with the ino provided.

@@ -250,14 +250,14 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 func HandleHardlinkInstantiation(ctx context.Context, n *OptiFSNode, targetPath, sourcePath, name string, s *syscall.Stat_t, out *fuse.EntryOut) (syscall.Errno, *fs.Inode) {
 	// Ensure that there is an existing entry for the source
 	sErr, sStableIno, sStableMode, sStableGen, _, _, sHash, sRef := metadata.RetrieveNodeInfo(sourcePath)
-	if sErr != nil {
+	if sErr != fs.OK {
 		return syscall.ENOENT, nil
 	}
 	stable := &fs.StableAttr{Ino: sStableIno, Mode: sStableMode, Gen: sStableGen}
 
 	// Ensure that there ISNT an existing entry for the target
 	tErr, _, _, _, _, _, _, _ := metadata.RetrieveNodeInfo(targetPath)
-	if tErr == nil {
+	if tErr == fs.OK {
 		return syscall.EEXIST, nil
 	}
 
@@ -287,7 +287,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 	// TRY AND FIND CUSTOM NODE
 	ferr, sIno, sMode, sGen, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
-	if ferr != nil { // If custom node doesn't exist, create a new one
+	if ferr != fs.OK { // If custom node doesn't exist, create a new one
 
 		log.Println("Persistent node entry doesn't exist")
 
@@ -373,7 +373,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		log.Println("Created new InodeEmbedder!")
 
 		cerr, customMetadata := metadata.LookupDirMetadata(nodePath)
-		if cerr != nil {
+		if cerr != 0 {
 			log.Println("No custom metadata found - EXITING!")
 			return fs.ToErrno(syscall.ENODATA), nil, nil
 		}
