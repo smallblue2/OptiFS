@@ -93,7 +93,7 @@ func SetCustomXAttr(customMetadata *MapEntryMetadata, attr string, data []byte, 
 
 	if customMetadata == nil || customMetadata.XAttr == nil {
 		log.Println("No custom metadata or XAttr available!")
-		return fs.ToErrno(syscall.EIO) // Internal error or uninitialized structure
+		return fs.ToErrno(syscall.ENODATA) // Internal error or uninitialized structure
 	}
 
 	// Ensure to get the correct lock
@@ -144,7 +144,7 @@ func RemoveCustomXAttr(customMetadata *MapEntryMetadata, attr string, isDir bool
 
 	if customMetadata == nil || customMetadata.XAttr == nil {
 		log.Println("No custom metadata or XAttr available!")
-		return fs.ToErrno(syscall.EIO) // Internal error or uninitialized structure
+		return fs.ToErrno(syscall.ENODATA) // Internal error or uninitialized structure
 	}
 
 	// Ensure to get the correct lock
@@ -173,7 +173,7 @@ func RemoveCustomXAttr(customMetadata *MapEntryMetadata, attr string, isDir bool
 func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool) (uint32, syscall.Errno) {
 	if customMetadata == nil || customMetadata.XAttr == nil {
 		log.Println("No custom metadata or XAttr available!")
-		return 0, fs.ToErrno(syscall.EIO)
+		return 0, fs.ToErrno(syscall.ENODATA)
 	}
 
 	if len(customMetadata.XAttr) == 0 {

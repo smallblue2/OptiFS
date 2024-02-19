@@ -16,10 +16,10 @@ import (
 func IsContentHashUnique(contentHash [64]byte) bool {
 
 	// If it's an empty file, just state it's unique
-	var defaultHash [64]byte
-	if contentHash == defaultHash {
-		return true
-	}
+	//var defaultHash [64]byte
+	//if contentHash == defaultHash {
+	//	return true
+	//}
 
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
@@ -75,11 +75,11 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *Map
 	//log.Println("Looking up a contentHash and refNum...")
 
 	// First check for default values
-	var defaultByteArray [64]byte
-	if contentHash == defaultByteArray || refNum == 0 {
-		//log.Println("Default values detected, no MapEntryMetadata available")
-		return errors.New("Default values detected"), &MapEntryMetadata{}
-	}
+	//var defaultByteArray [64]byte
+	//if contentHash == defaultByteArray || refNum == 0 {
+	//	//log.Println("Default values detected, no MapEntryMetadata available")
+	//	return errors.New("Default values detected"), &MapEntryMetadata{}
+	//}
 
 	// Now actually query the hashmap
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
@@ -95,11 +95,11 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *Map
 //
 // Returns the retrived MapEntry, or an error if it doesn't exist
 func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
-	// If it's an empty file, just state it's unique
-	var defaultHash [64]byte
-	if contentHash == defaultHash {
-		return errors.New("Entry doesn't exist!"), nil
-	}
+	//var defaultHash [64]byte
+	//if contentHash == defaultHash {
+	//	return errors.New("Entry doesn't exist!"), nil
+	//}
+
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	metadataMutex.RLock()
@@ -117,10 +117,10 @@ func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
 // Also handles if this potentially creates an empty MapEntry struct.
 func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
 	// If we have a default hash, ignore it
-	var defaultHash [64]byte
-	if contentHash == defaultHash {
-		return nil
-	}
+	//var defaultHash [64]byte
+	//if contentHash == defaultHash {
+	//	return nil
+	//}
 
 	log.Printf("Removing Metadata for refNum{%v}, contentHash{%+v}\n", refNum, contentHash)
 
@@ -340,10 +340,10 @@ func InitialiseNewDuplicateFileMetadata(newMeta *MapEntryMetadata, spareUnstable
 // If the MapEntry already exists, we will simply pass back the already created MapEntry
 func CreateRegularFileMapEntry(contentHash [64]byte) *MapEntry {
 	// Ignore default hashes
-	var defaultHash [64]byte
-	if contentHash == defaultHash {
-		return nil
-	}
+	//var defaultHash [64]byte
+	//if contentHash == defaultHash {
+	//	return nil
+	//}
 	// read lock for reading the hashmap
 	metadataMutex.RLock()
 	if entry, ok := regularFileMetadataHash[contentHash]; ok {

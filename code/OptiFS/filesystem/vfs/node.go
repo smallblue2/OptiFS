@@ -94,8 +94,10 @@ func (n *OptiFSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Er
 	var s syscall.Statfs_t = syscall.Statfs_t{}
 	err := syscall.Statfs(n.RPath(), &s)
 	if err != nil {
+        log.Println("Failed to stat underlying!")
 		return fs.ToErrno(err)
 	}
+    log.Printf("%v\n", s)
 	out.FromStatfsT(&s)
 	return fs.OK
 }
@@ -244,6 +246,8 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 // opens a directory and then closes it
 func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 
+    log.Println("In OPENDIR!")
+
 	path := n.RPath()
 	log.Printf("Opening directory '%v'\n", path)
 
@@ -256,20 +260,25 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 			log.Println("Not allowed!")
 			return fs.ToErrno(syscall.EACCES)
 		}
-		log.Println("Not allowed!")
 	}
+
+    log.Printf("Attempting to open dir - {%v}\n", path)
 
 	// Open the directory (n), 0755 is the default perms for a new directory
 	dir, err2 := syscall.Open(n.RPath(), syscall.O_DIRECTORY, 0755)
 	if err2 != nil {
+        log.Printf("Error opening dir - {%v}\n", err2)
 		return fs.ToErrno(err2)
 	}
 	syscall.Close(dir) // close when finished
+    log.Println("Succesfully opened directory!")
 	return fs.OK
 }
 
 // opens a stream of dir entries,
 func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+
+    log.Println("Entered Readdir!")
 
 	path := n.RPath()
 
@@ -278,10 +287,12 @@ func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) 
 	if err1 == 0 {
 		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 0)
 		if !isAllowed {
+            log.Println("Not allowed!")
 			return nil, fs.ToErrno(syscall.EACCES)
 		}
-		log.Println("Not allowed!")
+        log.Println("Allowed to readdir!")
 	}
+
 
 	return fs.NewLoopbackDirStream(path)
 }
@@ -320,25 +331,33 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	if f == nil {
 		// IF we're dealing with the root, stat it directly as opposed to handling symlinks
 		if &n.Inode == n.Root() {
+            log.Printf("Trying to stat the root - %v\n", path)
 			err = syscall.Stat(path, &s) // if we are looking for the root of FS
 		} else {
 			// Otherwise, use Lstat to handle symlinks as well as normal files/directories
+            log.Println("Statting regular filesystem node")
 			err = syscall.Lstat(path, &s) // if it's just a normal file/dir
 		}
 
 		if err != nil {
+            log.Printf("We got an error - %v\n", err)
 			return fs.ToErrno(err)
 		}
+        log.Printf("Succesfully statted {%v} - {%v}\n", path, s)
 	} else {
-
+        log.Println("Statting through file descriptor")
 		serr := syscall.Fstat(f.(*OptiFSFile).fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
 
 		if serr != nil {
 			return fs.ToErrno(serr)
 		}
+        
+        log.Printf("Stat - %v\n", s)
 
-		out.FromStat(&s) // fill the attr into struct if no errors
 	}
+
+    out.FromStat(&s) // fill the attr into struct if no errors
+
 	return fs.OK
 }
 
@@ -436,6 +455,12 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 // Get EXTENDED attribute
 func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
 	log.Println("ENTERED GETXATTR")
+
+    // If we're dealing with the root, just return FS.OK
+	if &n.Inode == n.Root() {
+        return 0, fs.OK
+    }
+
     // Retrieve hash and refnums from persistent node
     _, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
 
@@ -470,6 +495,11 @@ func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (ui
 // Set EXTENDED attribute
 func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
 	log.Println("ENTERED SETXATTR")
+
+    // If we're dealing with the root, just return FS.OK
+	if &n.Inode == n.Root() {
+        return fs.OK
+    }
 
     // Retrieve hash and refnums from persistent node
     _, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
@@ -507,6 +537,11 @@ func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno
 
 	log.Println("ENTERED REMOVEXATTR")
 
+    // If we're dealing with the root, just return FS.OK
+	if &n.Inode == n.Root() {
+        return fs.OK
+    }
+
     // Retrieve hash and refnums from persistent node
     _, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
 
@@ -540,6 +575,11 @@ func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno
 // List EXTENDED attributes
 func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
 	//log.Println("ENTERED LISTXATTR")
+
+    // If we're dealing with the root, just return FS.OK
+	if &n.Inode == n.Root() {
+        return 0, fs.OK
+    }
 
     // Retrieve hash and refnums from persistent node
     _, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
