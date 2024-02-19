@@ -18,9 +18,12 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 	// Check the intent of the open flags
 	readIntent, writeIntent := checkOpenIntent(flags)
 
+	log.Printf("Write intent: {%v} || Read intent: {%v}\n", writeIntent, readIntent)
+
 	// If the open intends to read, check it has permission
 	if readIntent {
 		readPerm := CheckPermissions(ctx, nodeMetadata, 0)
+		log.Printf("Checked read perm -> {%v}\n", readPerm)
 		if !readPerm {
 			isAllowed = false
 		}
@@ -28,11 +31,13 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 	// If the open intends to write, check it has permission
 	if writeIntent {
 		writePerm := CheckPermissions(ctx, nodeMetadata, 1)
+		log.Printf("Checked write perm -> {%v}\n", writePerm)
 		if !writePerm {
 			isAllowed = false
 		}
 	}
 
+	log.Println("Is allowed -> {%v}\n", isAllowed)
 	return isAllowed
 }
 

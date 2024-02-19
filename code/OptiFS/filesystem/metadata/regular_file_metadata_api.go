@@ -10,16 +10,31 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 )
 
+func EmptyFileIdentifier(contentHash [64]byte) bool {
+	var defaultHash [64]byte
+	// if the hash is empty (0000000000...) then the file must be empty
+	if contentHash == defaultHash {
+		log.Println("EMPTY FILE FOUND: IS UNIQUE")
+		return true
+	} else {
+		return false
+	}
+}
+
 // Performs a lookup on the regularFileMetadataHash to tell if the provided content hash is unique.
 //
 // Returns a bool for whether the contentHash can be found
 func IsContentHashUnique(contentHash [64]byte) bool {
-
 	// If it's an empty file, just state it's unique
 	//var defaultHash [64]byte
 	//if contentHash == defaultHash {
 	//	return true
 	//}
+
+	// if it is an empty file
+	if EmptyFileIdentifier(contentHash) {
+		return true
+	}
 
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
@@ -257,7 +272,7 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
 	(*newMeta).Gid = (*oldMeta).Gid
 	(*newMeta).Dev = (*oldMeta).Dev
 	(*newMeta).Ino = (*oldMeta).Ino
-    (*newMeta).XAttr = (*oldMeta).XAttr
+	(*newMeta).XAttr = (*oldMeta).XAttr
 
 	// New attributes to refresh from stat
 	(*newMeta).Atim = (*unstableAttr).Atim
@@ -293,7 +308,7 @@ func MigrateDuplicateFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMe
 	(*newMeta).Nlink = (*oldMeta).Nlink
 	(*newMeta).X__pad0 = (*oldMeta).X__pad0
 	(*newMeta).X__unused = (*oldMeta).X__unused
-    (*newMeta).XAttr = (*oldMeta).XAttr
+	(*newMeta).XAttr = (*oldMeta).XAttr
 
 	// Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
 	(*newMeta).Size = (*unstableAttr).Size
@@ -326,7 +341,7 @@ func InitialiseNewDuplicateFileMetadata(newMeta *MapEntryMetadata, spareUnstable
 	(*newMeta).Nlink = (*spareUnstableAttr).Nlink
 	(*newMeta).X__pad0 = (*spareUnstableAttr).X__pad0
 	(*newMeta).X__unused = (*spareUnstableAttr).X__unused
-    (*newMeta).XAttr = make(map[string][]byte)
+	(*newMeta).XAttr = make(map[string][]byte)
 
 	// Attributes to update from hardlink stat - not sure if we need more from the underlying hardlink?
 	(*newMeta).Size = (*linkUnstableAttr).Size
