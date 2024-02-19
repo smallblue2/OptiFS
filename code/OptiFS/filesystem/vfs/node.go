@@ -226,7 +226,7 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 			log.Println("Not allowed!")
 			return nil, fs.ToErrno(syscall.EACCES)
 		}
-		log.Println("Not allowed!")
+		log.Println("Allowed!")
 	}
 
 	filePath := filepath.Join(n.RPath(), name) // getting the full path to the file (join name to path)
