@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -252,14 +253,16 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 	log.Printf("Opening directory '%v'\n", path)
 
 	// Check exec permissions if there is custom metadata
+    var customExists bool
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
-	if err1 == 0 {
+	if err1 == fs.OK {
 		log.Println("Checking directory custom permissions")
 		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
 		if !isAllowed {
 			log.Println("Not allowed!")
 			return fs.ToErrno(syscall.EACCES)
 		}
+        customExists = true
 	}
 
 	log.Printf("Attempting to open dir - {%v}\n", path)
@@ -270,6 +273,11 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 		log.Printf("Error opening dir - {%v}\n", err2)
 		return fs.ToErrno(err2)
 	}
+    // Update the access time of the custom metadata if it exists
+    if customExists {
+        now := time.Now()
+        metadata.UpdateTime(dirMetadata, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, nil, nil, true)
+    }
 	syscall.Close(dir) // close when finished
 	log.Println("Succesfully opened directory!")
 	return fs.OK
@@ -305,19 +313,23 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	// Not sure if attributes carry over node Lookups, check persistent storage to be sure
 	var existingHash [64]byte
 	var existingRef uint64
-	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == fs.OK && !isDir {
+	if err, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == fs.OK {
 		existingHash = hash
 		existingRef = ref
 	}
 
-	// Try and get an entry in our own custom system
-	err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
-	if err1 == nil { // If it exists
-		metadata.FillAttrOut(fileMetadata, out)
-		return fs.OK
-	}
+    log.Println("Made it past RetrieveNodeInfo!")
+
+    // Try and get an entry in our own custom system
+    err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
+    if err1 == fs.OK { // If it exists
+        log.Println("Found custom file metadata!")
+        metadata.FillAttrOut(fileMetadata, out)
+        return fs.OK
+    }
 	err2, dirMetadata := metadata.LookupDirMetadata(path)
 	if err2 == 0 {
+        log.Println("Found custom directory metadata!")
 		metadata.FillAttrOut(dirMetadata, out)
 		return fs.OK
 	}
@@ -385,7 +397,7 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 
 	// Check to see if we can find an entry in our node hashmap
 	err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
-	if err1 == nil {
+	if err1 == fs.OK {
 		log.Println("Setting attributes for custom regular file metadata.")
 		if f != nil {
 			return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, f.(*OptiFSFile), out, isDir))
@@ -431,7 +443,7 @@ func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, f
 	// Check custom permissions for opening the file
 	// Lookup metadata entry
 	herr, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
-	if herr == nil { // If we found custom metadata
+	if herr == fs.OK { // If we found custom metadata
 		log.Println("Checking custom metadata for OPEN permission")
 		allowed := permissions.CheckOpenPermissions(ctx, fileMetadata, flags)
 		if !allowed {
@@ -467,7 +479,7 @@ func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (ui
 	var customMetadata *metadata.MapEntryMetadata
 	var isDir bool
 	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-	if err1 == nil {
+	if err1 == fs.OK {
 		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
 		if !hasRead {
 			return 0, syscall.EACCES
@@ -507,7 +519,7 @@ func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, fla
 	var customMetadata *metadata.MapEntryMetadata
 	var isDir bool
 	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-	if err1 == nil {
+	if err1 == fs.OK {
 		hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
 		if !hasWrite {
 			return syscall.EACCES
@@ -550,7 +562,7 @@ func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno
 
 	// Check if the user has write access
 	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-	if err1 == nil {
+	if err1 == fs.OK {
 		hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
 		if !hasWrite {
 			return syscall.EACCES
@@ -589,7 +601,7 @@ func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscal
 
 	// Check if the user has read access
 	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-	if err1 == nil {
+	if err1 == fs.OK {
 		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
 		if !hasRead {
 			return 0, syscall.EACCES
@@ -625,7 +637,7 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 	_, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path)
 
 	// Check if custom metadata exists for a regular file
-	if err, fileMetadata := metadata.LookupRegularFileMetadata(hash, ref); err == nil {
+	if err, fileMetadata := metadata.LookupRegularFileMetadata(hash, ref); err == fs.OK {
 		// If there is no metadata, just perform a normal ACCESS on the underlying node
 		log.Println("Found custom regular file metadata, checking...")
 		isAllowed := permissions.CheckMask(ctx, mask, fileMetadata)
@@ -776,7 +788,6 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 			hashHashMap[filePath] = &writeStore{uid: person.Uid, gid: person.Gid}
 		}
 	}
-	n.setOwner(ctx, filePath) // set who made the file
 
 	// stat the new file, making sure it was created
 	s := syscall.Stat_t{}
@@ -787,6 +798,12 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 	}
 
 	oErr, oNode, oFile := HandleNodeInstantiation(ctx, n, filePath, name, &s, out, &fdesc, &flags)
+
+    // Update the parent directory's modification and change time
+    if err1 == fs.OK { 
+        now := time.Now()
+        metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+    }
 
 	return oNode, oFile, 0, oErr
 }
@@ -804,7 +821,7 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 	// Check write and exec permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err1 == 0 {
+	if err1 == fs.OK {
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
 		if !writePerm {
@@ -843,6 +860,12 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 		metadata.RemoveNodeInfo(filePath)
 	}
 
+    // Update the parent directory's modification time
+    if err1 == fs.OK { 
+        now := time.Now()
+        metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+    }
+
 	return fs.ToErrno(err)
 }
 
@@ -880,6 +903,13 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	metadata.RemoveNodeInfo(filePath)
 
 	rErr := syscall.Rmdir(filePath)
+
+    // Update the parent directory's modification time
+    if err1 == fs.OK { 
+        now := time.Now()
+        metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+    }
+
 	return fs.ToErrno(rErr)
 }
 
@@ -919,7 +949,7 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 		// Ensure we have permission to write to the file
 		// Check if we have permission to write to the file
 		err, fileMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-		if err == nil { // if it exists
+		if err == fs.OK { // if it exists
 			writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1) // check write perm
 			if !writePerm {
 				return 0, syscall.EACCES
@@ -966,6 +996,12 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 			//log.Println("Error performing normal write!")
 			return 0, fs.ToErrno(werr)
 		}
+
+        // Update file's mtime
+        if err == fs.OK {
+            now := time.Now()
+            metadata.UpdateTime(fileMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, nil, false)
+        }
 
 		// Hopefully force the kernel to re-lookup
 		refreshMemory(&n.Inode)
@@ -1072,7 +1108,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 		}
 
 		err2, entry := metadata.LookupRegularFileEntry(newHash)
-		if err2 != nil {
+		if err2 != fs.OK {
 			log.Println("MapEntry doesn't exist!")
 			return fs.ToErrno(syscall.ENODATA) // return EAGAIN if we error here, not sure what is appropriate...
 		}
@@ -1144,7 +1180,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 			log.Println("Successfuly overwrote original file with temporary link file!")
 
 			// Update custom metadata
-			if err1 == nil {
+			if err1 == fs.OK {
 				metadata.MigrateDuplicateFileMetadata(oldMetadata, fileMetadata, &st)
 				metadata.RemoveRegularFileMetadata(newHash, newRef)
 				log.Println("Updated metadata through migrating old metadata")
@@ -1188,8 +1224,11 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 			}
 
 			log.Println("Finished de-duplicating file!")
-
-			// Hopefully force the kernel to re-lookup
+            // Update the gen number
+            metadata.UpdateGenNumber(fileMetadata, false)
+            // Update the times
+            now := time.Now()
+            metadata.UpdateTime(fileMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, false)
 
 			return fs.OK
 		} else {
@@ -1204,7 +1243,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 			}
 			log.Println("Sucessfully statted the file!")
 
-			if err1 == nil { // If we had old metadata, keep aspects of it
+			if err1 == fs.OK { // If we had old metadata, keep aspects of it
 				metadata.MigrateRegularFileMetadata(oldMetadata, fileMetadata, &st)
 				log.Println("Migrated old existing metadata over!")
 			} else { // If we don't have old metadata, do a full copy of the underlying node's metadata
@@ -1223,6 +1262,12 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 			//unix.FcntlInt(uintptr(f.(*OptiFSFile).fdesc), 0x101000, 0)
 
 			// Hopefully force the kernel to re-lookup
+
+            // Update the gen number
+            metadata.UpdateGenNumber(fileMetadata, false)
+            // Update the times
+            now := time.Now()
+            metadata.UpdateTime(fileMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, false)
 
 			return f.(fs.FileReleaser).Release(ctx)
 		}
@@ -1245,7 +1290,7 @@ func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) s
 	if f != nil {
 		// Check write permission
 		err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
-		if err == nil {
+		if err == fs.OK {
 			writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1)
 			if !writePerm {
 				return fs.ToErrno(syscall.EACCES)
@@ -1374,6 +1419,15 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 		}
 	}
 
+    // Now update both parent directories modified timestamps
+    now := time.Now()
+    if err1 == fs.OK {
+        metadata.UpdateTime(dir1Metadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+    }
+    if err2 == fs.OK {
+        metadata.UpdateTime(dir2Metadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+    }
+
 	return returnErr
 }
 
@@ -1466,7 +1520,7 @@ func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev ui
 
 	// Check the write and execute permissions of the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
-	if err1 == 0 {
+	if err1 == fs.OK {
 		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
 		if !hasWrite {
 			return nil, fs.ToErrno(syscall.EACCES)
@@ -1484,9 +1538,6 @@ func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev ui
 		return nil, fs.ToErrno(err)
 	}
 
-	// Keep the owner
-	n.setOwner(ctx, nodePath)
-
 	st := syscall.Stat_t{}
 	if err := syscall.Lstat(nodePath, &st); err != nil {
 		// Kill the node if we can't Lstat it - something went wrong
@@ -1496,6 +1547,12 @@ func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev ui
 
 	// Handle the creation of a new node
 	oErr, oNode, _ := HandleNodeInstantiation(ctx, n, nodePath, name, &st, out, nil, nil)
+
+    // Update the parent directory's modification and change time
+    if err1 == fs.OK {
+        now := time.Now()
+        metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+    }
 
 	return oNode, oErr
 }
@@ -1511,7 +1568,7 @@ func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name str
 
 	// Check write and execute permissions on the source directory
 	err1, dirMetadata := metadata.LookupDirMetadata(target.EmbeddedInode().Path(nil))
-	if err1 == 0 {
+	if err1 == fs.OK {
 		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
 		if !hasWrite {
 			return nil, fs.ToErrno(syscall.EACCES)
@@ -1542,6 +1599,12 @@ func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name str
 		syscall.Unlink(targetPath)
 		return nil, oErr
 	}
+
+    // Update parent directories modified time
+    if err1 == fs.OK {
+        now := time.Now()
+        metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+    }
 
 	return oNode, oErr
 }

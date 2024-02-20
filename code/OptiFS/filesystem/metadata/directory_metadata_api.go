@@ -24,18 +24,20 @@ func CreateDirEntry(path string) *MapEntryMetadata {
 // Performs a lookup for a directory entry in the directoryMetadataHash with
 // the path being the key
 func LookupDirMetadata(path string) (syscall.Errno, *MapEntryMetadata) {
+    log.Println("Entered DIRECTORY metadata lookup!")
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	dirMutex.RLock()
 	defer dirMutex.RUnlock()
+    log.Println("Got lock")
 
-	//log.Printf("Looking up metadata for dir (%v)\n", path)
+	log.Printf("Looking up metadata for dir (%v)\n", path)
 	metadata, ok := dirMetadataHash[path]
 	if !ok {
-		//log.Println("Couldn't find a custom directory metadata entry")
+		log.Println("Couldn't find a custom directory metadata entry")
 		return fs.ToErrno(syscall.ENODATA), nil
 	}
-	//log.Println("Found a custom directory metadata entry")
+	log.Println("Found a custom directory metadata entry")
 	return 0, metadata
 }
 

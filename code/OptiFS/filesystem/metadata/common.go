@@ -218,3 +218,16 @@ func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool)
 	copy(*dest, tempBuffer.Bytes())
 	return totalSizeNeeded, fs.OK
 }
+
+// Updates the Gen Number of the current MapEntryMetadata
+func UpdateGenNumber(current *MapEntryMetadata, isDir bool) {
+    if isDir {
+        dirMutex.Lock()
+        defer dirMutex.Unlock()
+    } else {
+        metadataMutex.Lock()
+        defer metadataMutex.Unlock()
+    }
+
+    current.Gen++
+}
