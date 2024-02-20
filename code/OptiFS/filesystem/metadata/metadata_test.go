@@ -266,7 +266,7 @@ func TestRemoveCustomXAttr(t *testing.T) {
 			metadata:    nil,
 			attr:        "anything",
 			isDir:       false,
-			expectedErr: fs.ToErrno(syscall.EIO),
+			expectedErr: fs.ToErrno(syscall.ENODATA),
 		},
 	}
 
@@ -302,7 +302,7 @@ func TestListCustomXAttr(t *testing.T) {
 			name:         "nil metadata",
 			metadata:     nil,
 			bufferSize:   100,
-			expectedErr:  fs.ToErrno(syscall.EIO),
+			expectedErr:  fs.ToErrno(syscall.ENODATA),
 			expectedLen:  0,
 			expectedDest: "",
 		},
