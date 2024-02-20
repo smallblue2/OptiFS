@@ -2,11 +2,11 @@ package permissions
 
 import (
 	"context"
-	"errors"
 	"filesystem/metadata"
 	"log"
 	"syscall"
 
+	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
@@ -37,7 +37,7 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 		}
 	}
 
-	log.Println("Is allowed -> {%v}\n", isAllowed)
+	log.Printf("Is allowed -> {%v}\n", isAllowed)
 	return isAllowed
 }
 
@@ -48,7 +48,7 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 // EXEC -> op = 2
 func CheckPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, op uint8) bool {
 	err1, uid, gid := GetUIDGID(ctx)
-	if err1 != nil {
+	if err1 != fs.OK {
 		return false
 	}
 
@@ -103,7 +103,7 @@ func checkMode(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata, 
 // Checks if the caller is the owner of a node
 func IsOwner(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata) bool {
 	err, uid, _ := GetUIDGID(ctx)
-	if err != nil {
+	if err != fs.OK {
 		return false
 	}
 
@@ -142,25 +142,26 @@ func checkPermissionBits(mask, mode uint32) bool {
 
 // returns the intent of an open, what permissions will be required
 func checkOpenIntent(flags uint32) (readIntent bool, writeIntent bool) {
-	if flags&syscall.O_RDONLY == syscall.O_RDONLY || flags&syscall.O_RDWR == syscall.O_RDWR {
+	// syscall.O_RDONLY is 0!!
+	if flags == syscall.O_RDONLY || flags&syscall.O_RDWR != 0 {
 		readIntent = true
 	}
-	if flags&syscall.O_WRONLY == syscall.O_WRONLY || flags&syscall.O_RDWR == syscall.O_RDWR ||
-		flags&syscall.O_CREAT == syscall.O_CREAT || flags&syscall.O_TRUNC == syscall.O_TRUNC ||
-		flags&syscall.O_APPEND == syscall.O_APPEND {
+	if flags&syscall.O_WRONLY != 0 || flags&syscall.O_RDWR != 0 ||
+		flags&syscall.O_CREAT != 0 || flags&syscall.O_TRUNC != 0 ||
+		flags&syscall.O_APPEND != 0 {
 		writeIntent = true
 	}
 	return
 }
 
 // Gets the caller UID and GID from the context provided
-func GetUIDGID(ctx context.Context) (error, uint32, uint32) {
+func GetUIDGID(ctx context.Context) (syscall.Errno, uint32, uint32) {
 	caller, check := fuse.FromContext(ctx)
 	if !check {
 		log.Println("No caller info available")
-		return errors.New("No caller info available"), 0, 0
+		return fs.ToErrno(syscall.ENODATA), 0, 0
 	}
-	return nil, uint32(caller.Uid), uint32(caller.Gid)
+	return fs.OK, uint32(caller.Uid), uint32(caller.Gid)
 }
 
 // Checks a mask against nodeMetadata mode
@@ -168,7 +169,7 @@ func CheckMask(ctx context.Context, mask uint32, nodeMetadata *metadata.MapEntry
 
 	// Extract the UID and GID from the context
 	err1, currentUID, currentGID := GetUIDGID(ctx)
-	if err1 != nil {
+	if err1 != fs.OK {
 		log.Println("Can't get user context")
 		return false
 	}

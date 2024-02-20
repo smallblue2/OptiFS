@@ -121,7 +121,7 @@ func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
 	if n.IsRoot() {
 		log.Println(">>> WE ARE IN ROOT!!!!!")
 		err, userID, groupID := permissions.GetUIDGID(ctx) // get the UID/GID of the person doing the syscall
-		if err != nil {
+		if err != fs.OK {
 			log.Println("ERROR GETTING UID/GID")
 			return fs.ToErrno(err)
 		}
@@ -147,7 +147,7 @@ func (n *OptiFSNode) IsAllowedTwoLocations(ctx context.Context, newParent fs.Ino
 	if n.IsRoot() || dest.IsRoot() {
 		log.Println(">>> SRC OR DEST IS IN ROOT!!!!!")
 		err, userID, groupID := permissions.GetUIDGID(ctx) // get the UID/GID of the person doing the syscall
-		if err != nil {
+		if err != fs.OK {
 			log.Println("ERROR GETTING UID/GID")
 			return fs.ToErrno(err)
 		}
@@ -699,19 +699,19 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 	oErr, oInode, _ := HandleNodeInstantiation(ctx, n, filePath, name, &directoryStatus, out, nil, nil)
 
 	// Update our custom metadata system
-    stAttr := oInode.StableAttr()
-    dirErr := metadata.UpdateDirEntry(filePath, &directoryStatus, &stAttr) // TODO: maybe migrate
-    if dirErr != 0 {
-        return oInode, dirErr
-    }
-    finalDir, newMetadata := metadata.LookupDirMetadata(filePath)
-    if finalDir != 0 {
-        return oInode, finalDir
-    }
-    caller, check := fuse.FromContext(ctx)
-    if check {
-        metadata.UpdateOwner(newMetadata, &caller.Uid, &caller.Gid, true)
-    }
+	stAttr := oInode.StableAttr()
+	dirErr := metadata.UpdateDirEntry(filePath, &directoryStatus, &stAttr) // TODO: maybe migrate
+	if dirErr != 0 {
+		return oInode, dirErr
+	}
+	finalDir, newMetadata := metadata.LookupDirMetadata(filePath)
+	if finalDir != 0 {
+		return oInode, finalDir
+	}
+	caller, check := fuse.FromContext(ctx)
+	if check {
+		metadata.UpdateOwner(newMetadata, &caller.Uid, &caller.Gid, true)
+	}
 
 	return oInode, oErr
 }
@@ -968,7 +968,7 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 		}
 
 		// Hopefully force the kernel to re-lookup
-        refreshMemory(&n.Inode)
+		refreshMemory(&n.Inode)
 
 		//log.Println("Wrote to file succesfully")
 		return uint32(numOfBytesWritten), fs.OK
@@ -1009,7 +1009,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 		hashHashMapLock.Unlock()
 		log.Println("Writing intent, continuing to perform de-duplication steps")
 
-        defer refreshMemory(&n.Inode)
+		defer refreshMemory(&n.Inode)
 
 		// These will be defined from writeStore below, to tell who originally performed the write
 		var callerUid uint32
@@ -1236,7 +1236,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 func refreshMemory(n *fs.Inode) {
 	dirname, dirino := n.Parent()
 	log.Printf("NOTIFYING ENTRY, {%v} - {%v}\n", dirname, dirino.Path(nil))
-    log.Printf("Children; {%v}\n", dirino.Children())
+	log.Printf("Children; {%v}\n", dirino.Children())
 	dirino.NotifyEntry(dirname)
 }
 
