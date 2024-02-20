@@ -516,3 +516,246 @@ func TestCheckMask(t *testing.T) {
 		})
 	}
 }
+
+func TestSetSysadmin(t *testing.T) {
+	testCases := []struct {
+		name            string
+		uid             uint32
+		gid             uint32
+		currentSysadmin Sysadmin
+		expectedError   syscall.Errno
+	}{
+		{
+			name: "Set - success",
+			uid:  1000,
+			gid:  1000,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedError: fs.OK,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
+			err := SetSysadmin()
+			if err != tc.expectedError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+			}
+			if err == fs.OK {
+				if SysAdmin.UID != tc.uid {
+					t.Errorf("Expected %v, got %v\n", tc.uid, SysAdmin.UID)
+				}
+			}
+		})
+	}
+}
+
+func TestIsUserSysadmin(t *testing.T) {
+	testCases := []struct {
+		name            string
+		uid             uint32
+		gid             uint32
+		currentSysadmin Sysadmin
+		expected        bool
+	}{
+		{
+			name: "User is sysadmin",
+			uid:  1000,
+			gid:  1000,
+			currentSysadmin: Sysadmin{
+				UID: 1000,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
+		},
+		{
+			name: "User is sysadmin",
+			uid:  1000,
+			gid:  1000,
+			currentSysadmin: Sysadmin{
+				UID: 1238,
+				GID: 1000,
+				Set: true,
+			},
+			expected: true,
+		},
+		{
+			name: "User is not sysadmin",
+			uid:  1000,
+			gid:  1000,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
+			result := IsUserSysadmin()
+			if result != tc.expected {
+				t.Errorf("Expected %v. got %v\n", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestValidUID(t *testing.T) {
+	testCases := []struct {
+		name     string
+		uid      string
+		expected bool
+	}{
+		{
+			name:     "Valid UID check",
+			uid:      "1000",
+			expected: true,
+		},
+		{
+			name:     "Invalid UID check",
+			uid:      "09248",
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ValidUID(tc.uid)
+			if result != tc.expected {
+				t.Errorf("Expected %v, got %v", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestValidGID(t *testing.T) {
+	testCases := []struct {
+		name     string
+		gid      string
+		expected bool
+	}{
+		{
+			name:     "Valid UID check",
+			gid:      "1000",
+			expected: true,
+		},
+		{
+			name:     "Invalid UID check",
+			gid:      "09248",
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ValidGID(tc.gid)
+			if result != tc.expected {
+				t.Errorf("Expected %v, got %v", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestChangeSysadminUID(t *testing.T) {
+	testCases := []struct {
+		name            string
+		uid             string
+		currentSysadmin Sysadmin
+		expectedUid     uint32
+		expectedError   syscall.Errno
+	}{
+		{
+			name: "Change sysadmin - valid",
+			uid:  "1000",
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedUid:   1000,
+			expectedError: fs.OK,
+		},
+		{
+			name: "Change sysadmin - invalid",
+			uid:  "9248",
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedUid:   9248,
+			expectedError: fs.ToErrno(syscall.ENOENT),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
+			err := ChangeSysadminUID(tc.uid)
+			if err != tc.expectedError {
+				t.Errorf("Expected %v. got %v\n", tc.expectedError, err)
+			}
+			if err == fs.OK {
+				if SysAdmin.UID != tc.expectedUid {
+					t.Errorf("Expected %v, got %v\n", tc.expectedUid, SysAdmin.UID)
+				}
+			}
+		})
+	}
+}
+
+func TestChangeSysadminGID(t *testing.T) {
+	testCases := []struct {
+		name            string
+		gid             string
+		currentSysadmin Sysadmin
+		expectedGid     uint32
+		expectedError   syscall.Errno
+	}{
+		{
+			name: "Change sysadmin - valid",
+			gid:  "1000",
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedGid:   1000,
+			expectedError: fs.OK,
+		},
+		{
+			name: "Change sysadmin - invalid",
+			gid:  "9248",
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedGid:   9248,
+			expectedError: fs.ToErrno(syscall.ENOENT),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
+			err := ChangeSysadminGID(tc.gid)
+			if err != tc.expectedError {
+				t.Errorf("Expected %v. got %v\n", tc.expectedError, err)
+			}
+			if err == fs.OK {
+				if SysAdmin.GID != tc.expectedGid {
+					t.Errorf("Expected %v, got %v\n", tc.expectedGid, SysAdmin.GID)
+				}
+			}
+		})
+	}
+}
