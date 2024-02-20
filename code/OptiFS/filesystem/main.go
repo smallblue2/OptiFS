@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
@@ -45,6 +46,9 @@ func main() {
 	options := &fs.Options{}
 	options.Debug = *debug                                                               // set the debug value the user chooses (T/F)
 	options.AllowOther = true                                                            // Gives users access other than the one that originally mounts it
+    sec := time.Duration(0)      // Attempting to prevent caching
+    options.EntryTimeout = &sec
+    options.AttrTimeout = &sec
 	options.MountOptions.Options = append(options.MountOptions.Options, "fsname="+under) // set the filesystem name
 	options.NullPermissions = true                                                       // doesn't check the permissions for calls (good for setting up custom permissions [namespaces??])
 

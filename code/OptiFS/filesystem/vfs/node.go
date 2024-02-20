@@ -699,6 +699,19 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 	oErr, oInode, _ := HandleNodeInstantiation(ctx, n, filePath, name, &directoryStatus, out, nil, nil)
 
 	// Update our custom metadata system
+    stAttr := oInode.StableAttr()
+    dirErr := metadata.UpdateDirEntry(filePath, &directoryStatus, &stAttr) // TODO: maybe migrate
+    if dirErr != 0 {
+        return oInode, dirErr
+    }
+    finalDir, newMetadata := metadata.LookupDirMetadata(filePath)
+    if finalDir != 0 {
+        return oInode, finalDir
+    }
+    caller, check := fuse.FromContext(ctx)
+    if check {
+        metadata.UpdateOwner(newMetadata, &caller.Uid, &caller.Gid, true)
+    }
 
 	return oInode, oErr
 }
@@ -953,6 +966,10 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 			//log.Println("Error performing normal write!")
 			return 0, fs.ToErrno(werr)
 		}
+
+		// Hopefully force the kernel to re-lookup
+        refreshMemory(&n.Inode)
+
 		//log.Println("Wrote to file succesfully")
 		return uint32(numOfBytesWritten), fs.OK
 	}
@@ -991,6 +1008,8 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 		}
 		hashHashMapLock.Unlock()
 		log.Println("Writing intent, continuing to perform de-duplication steps")
+
+        defer refreshMemory(&n.Inode)
 
 		// These will be defined from writeStore below, to tell who originally performed the write
 		var callerUid uint32
@@ -1169,6 +1188,9 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 			}
 
 			log.Println("Finished de-duplicating file!")
+
+			// Hopefully force the kernel to re-lookup
+
 			return fs.OK
 		} else {
 			log.Println("Simply updating metadata, file is unique")
@@ -1190,12 +1212,17 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 				stableAttr := n.StableAttr()
 				metadata.FullMapEntryMetadataUpdate(fileMetadata, &st, &stableAttr, nodePath)
 				// Double check to force the owner to be correct
-				log.Printf("Setting custom owner for empty file, {%v} - {%v}\n", callerUid, callerGid)
+				log.Printf("Forcing ownership on newfile, {%v} - {%v}\n", callerUid, callerGid)
 				metadata.UpdateOwner(fileMetadata, &callerUid, &callerGid, false)
 				log.Println("Performed full MapEntryMetadata update as previous metadata didn't exist!")
 			}
 
 			log.Println("Closing the file now!")
+
+			// Attempt at forcing syncing - having caching issues
+			//unix.FcntlInt(uintptr(f.(*OptiFSFile).fdesc), 0x101000, 0)
+
+			// Hopefully force the kernel to re-lookup
 
 			return f.(fs.FileReleaser).Release(ctx)
 		}
@@ -1204,6 +1231,13 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 	log.Println("RELEASE - EBADFD")
 
 	return syscall.EBADFD // bad file descriptor
+}
+
+func refreshMemory(n *fs.Inode) {
+	dirname, dirino := n.Parent()
+	log.Printf("NOTIFYING ENTRY, {%v} - {%v}\n", dirname, dirino.Path(nil))
+    log.Printf("Children; {%v}\n", dirino.Children())
+	dirino.NotifyEntry(dirname)
 }
 
 func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {

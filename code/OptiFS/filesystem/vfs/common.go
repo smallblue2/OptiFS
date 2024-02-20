@@ -309,6 +309,13 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 		// Fill the output attributes from out stat struct
 		out.Attr.FromStat(s)
+        // Hopefully forcing no caching
+        //out.EntryValid = 0
+        //out.EntryValidNsec = 0
+        //out.AttrValidNsec = 0
+        //out.AttrValidNsec = 0
+        out.SetEntryTimeout(0)
+        out.SetAttrTimeout(0)
 		log.Println("Filled out from stat")
 
 		// Check if the lookup is for a directory or not
@@ -356,6 +363,8 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		}
 
 		metadata.FillAttr(customMetadata, &out.Attr)
+        out.SetEntryTimeout(0)
+        out.SetAttrTimeout(0)
 		log.Println("Filled out attributes with custom metadata!")
 
 		if fdesc != nil && flags != nil {
@@ -378,6 +387,8 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 			return fs.ToErrno(syscall.ENODATA), nil, nil
 		}
 		metadata.FillAttr(customMetadata, &out.Attr)
+        out.SetEntryTimeout(0)
+        out.SetAttrTimeout(0)
 		log.Println("Filled out attributes with custom metadata!")
 
 		x := n.NewInode(ctx, nd, *stable)
