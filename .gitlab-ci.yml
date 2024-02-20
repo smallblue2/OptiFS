@@ -1,0 +1,7 @@
+test: 
+  stage: test
+  image: golang:latest 
+  script:
+    - go test -v ./metadata ./permissions
+  volumes:
+    - ./code/OptiFS/filesystem:/. 
