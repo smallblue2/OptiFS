@@ -3,13 +3,13 @@
 package metadata
 
 import (
-	"errors"
 	"log"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
 
+// Detects if a file is empty (or technically a directory, special file, etc)
 func EmptyFileIdentifier(contentHash [64]byte) bool {
 	var defaultHash [64]byte
 	// if the hash is empty (0000000000...) then the file must be empty
@@ -81,13 +81,15 @@ func RetrieveRecent(entry *MapEntry) *MapEntryMetadata {
 }
 
 // Retrieves regular file metadata for a hash and refnum provided. Returns an error if it cannot be found
-func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *MapEntryMetadata) {
+func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (syscall.Errno, *MapEntryMetadata) {
+    log.Println("Entered REGFILE metadata lookup!")
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
+    log.Println("Waiting on metadataMutex lock!")
 	metadataMutex.RLock()
 	defer metadataMutex.RUnlock()
+    log.Println("Got lock")
 
-	//log.Println("Looking up a contentHash and refNum...")
 
 	// First check for default values
 	//var defaultByteArray [64]byte
@@ -96,20 +98,26 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (error, *Map
 	//	return errors.New("Default values detected"), &MapEntryMetadata{}
 	//}
 
+	log.Println("Looking up a contentHash and refNum...")
+
 	// Now actually query the hashmap
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
+        log.Println("FOUND HASH!")
 		if nodeMetadata, ok := contentEntry.EntryList[refNum]; ok {
-			return nil, nodeMetadata
+            log.Println("FOUND ENTRY!")
+			return fs.OK, nodeMetadata
 		}
 	}
+
+    log.Println("No entry found, returning ENODATA")
 	//log.Println("contentHash and refNum didn't lead to MapEntryMetadata")
-	return errors.New("Couldn't find entry!"), &MapEntryMetadata{}
+	return fs.ToErrno(syscall.ENODATA), nil
 }
 
 // Retrieves a MapEntry instance from regularFileMetadataHash using the content hash provided.
 //
 // Returns the retrived MapEntry, or an error if it doesn't exist
-func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
+func LookupRegularFileEntry(contentHash [64]byte) (syscall.Errno, *MapEntry) {
 	//var defaultHash [64]byte
 	//if contentHash == defaultHash {
 	//	return errors.New("Entry doesn't exist!"), nil
@@ -122,15 +130,15 @@ func LookupRegularFileEntry(contentHash [64]byte) (error, *MapEntry) {
 
 	entry, ok := regularFileMetadataHash[contentHash]
 	if !ok {
-		return errors.New("Entry doesn't exist!"), nil
+		return fs.ToErrno(syscall.ENODATA), nil
 	}
 
-	return nil, entry
+	return fs.OK, entry
 }
 
 // Removes a MapEntryMetadata instance in regularFileMetadataHash based on content hash and refnum provided.
 // Also handles if this potentially creates an empty MapEntry struct.
-func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
+func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) syscall.Errno {
 	// If we have a default hash, ignore it
 	//var defaultHash [64]byte
 	//if contentHash == defaultHash {
@@ -141,7 +149,7 @@ func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
 
 	// Check to see if an entry exists
 	err, entry, _ := RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash, refNum)
-	if err != nil {
+	if err != fs.OK {
 		log.Println("Couldn't find an entry!")
 		return err
 	}
@@ -166,11 +174,11 @@ func RemoveRegularFileMetadata(contentHash [64]byte, refNum uint64) error {
 	}
 	log.Println("Finished removing metadata")
 
-	return nil
+	return fs.OK
 }
 
 // Retrieves the MapEntry struct from which the Metadata entry struct that the refNum and contentHash links to
-func RetrieveRegularFileMapEntryFromHashAndRef(contentHash [64]byte, refNum uint64) (error, *MapEntry) {
+func RetrieveRegularFileMapEntryFromHashAndRef(contentHash [64]byte, refNum uint64) (syscall.Errno, *MapEntry) {
 
 	log.Println("Looking up MapEntry from Hash and Ref")
 
@@ -178,7 +186,7 @@ func RetrieveRegularFileMapEntryFromHashAndRef(contentHash [64]byte, refNum uint
 	var defaultByteArray [64]byte
 	if contentHash == defaultByteArray || refNum == 0 {
 		log.Println("Default values detected, no MapEntry available")
-		return errors.New("Default values detected"), &MapEntry{}
+		return fs.ToErrno(syscall.ENODATA), nil
 	}
 
 	// needs a read lock as data is not being modified, only read, so multiple
@@ -190,16 +198,16 @@ func RetrieveRegularFileMapEntryFromHashAndRef(contentHash [64]byte, refNum uint
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
 		if _, ok := contentEntry.EntryList[refNum]; ok {
 			log.Println("Found a MapEntry for valid hash and refnum!")
-			return nil, contentEntry
+			return fs.OK, contentEntry
 		}
 	}
 
 	log.Println("Couldn't find a MapEntry for provided hash and refnum")
-	return errors.New("Couldn't find entry!"), &MapEntry{}
+	return fs.ToErrno(syscall.ENODATA), nil
 }
 
 // Retrieves the MapEntry and MapEntryMetadata struct from which the reference num and content hash links to
-func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, refNum uint64) (error, *MapEntry, *MapEntryMetadata) {
+func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, refNum uint64) (syscall.Errno, *MapEntry, *MapEntryMetadata) {
 
 	log.Println("Looking up MapEntry and MapEntryMetadata from Hash and Ref")
 
@@ -207,7 +215,7 @@ func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, 
 	var defaultByteArray [64]byte
 	if contentHash == defaultByteArray || refNum == 0 {
 		log.Println("Default values detected, no MapEntry or MapEntryData available")
-		return errors.New("Default values detected"), &MapEntry{}, &MapEntryMetadata{}
+		return fs.ToErrno(syscall.ENODATA), nil, nil
 	}
 
 	// needs a read lock as data is not being modified, only read, so multiple
@@ -219,18 +227,18 @@ func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, 
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
 		if metadataEntry, ok := contentEntry.EntryList[refNum]; ok {
 			log.Println("Found a MapEntry and MapEntryMetadata for valid hash and refnum!")
-			return nil, contentEntry, metadataEntry
+			return fs.OK, contentEntry, metadataEntry
 		}
 	}
 
 	log.Println("Couldn't find a MapEntry and MapEntryMetadata for provided hash and refnum")
-	return errors.New("Couldn't find entry!"), &MapEntry{}, &MapEntryMetadata{}
+	return fs.ToErrno(syscall.ENODATA), nil, nil
 }
 
 // Updates a MapEntryMetadata instance corresponding to the content hash and reference num provided
 //
 // If refNum or contentHash is invalid, it returns an error
-func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) error {
+func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) syscall.Errno {
 
 	// locks for this function are implemented in the functions being called
 	// done to prevent deadlock
@@ -238,7 +246,7 @@ func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstable
 	// Ensure that contentHash and refNum is valid
 	// this function already has locks!
 	err, metadata := LookupRegularFileMetadata(contentHash, refNum)
-	if err != nil {
+	if err != fs.OK {
 		log.Println("Couldn't find the metadata struct")
 		return err
 	}
@@ -253,11 +261,11 @@ func UpdateFullRegularFileMetadata(contentHash [64]byte, refNum uint64, unstable
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through lookup")
 
-	return nil
+	return fs.OK
 }
 
 // Moves old metadata to a new node being created
-func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMetadata, unstableAttr *syscall.Stat_t) error {
+func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMetadata, unstableAttr *syscall.Stat_t) syscall.Errno {
 	// needs a write lock as we are modifying the metadata
 	metadataMutex.Lock()
 	defer metadataMutex.Unlock()
@@ -272,6 +280,7 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
 	(*newMeta).Gid = (*oldMeta).Gid
 	(*newMeta).Dev = (*oldMeta).Dev
 	(*newMeta).Ino = (*oldMeta).Ino
+    (*newMeta).Gen = (*oldMeta).Gen
 	(*newMeta).XAttr = (*oldMeta).XAttr
 
 	// New attributes to refresh from stat
@@ -285,11 +294,11 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
 	(*newMeta).X__pad0 = (*unstableAttr).X__pad0
 	(*newMeta).X__unused = (*unstableAttr).X__unused
 
-	return nil
+	return fs.OK
 }
 
 // Handle the passover or metadata in a duplicate scenario, where the underlying node is a hardlink, but we don't want it to appear as so
-func MigrateDuplicateFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMetadata, unstableAttr *syscall.Stat_t) error {
+func MigrateDuplicateFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMetadata, unstableAttr *syscall.Stat_t) syscall.Errno {
 	// needs a write lock as we are modifying the metadata
 	metadataMutex.Lock()
 	defer metadataMutex.Unlock()
@@ -315,7 +324,7 @@ func MigrateDuplicateFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMe
 	(*newMeta).Blksize = (*unstableAttr).Blksize
 	(*newMeta).Blocks = (*unstableAttr).Blocks
 
-	return nil
+	return fs.OK
 
 }
 

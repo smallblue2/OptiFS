@@ -1,4 +1,4 @@
-//please wokr please work im begging please please pelase pelase A FileHandle represents an open file or directory, acting as
+// please wokr please work im begging please please pelase pelase A FileHandle represents an open file or directory, acting as
 // an abstraction for an open file descriptor.
 package vfs
 
@@ -6,6 +6,7 @@ import (
 	"context"
 	"filesystem/metadata"
 	"filesystem/permissions"
+	"time"
 
 	"log"
 	"sync"
@@ -70,7 +71,7 @@ func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.
     log.Println("Checking for custom permissions")
     // Check permissions of custom metadata (if available)
     herr, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
-    if herr == nil {
+    if herr == fs.OK {
         log.Println("Custom permissions found!")
         allowed := permissions.CheckPermissions(ctx, fileMetadata, 0) // Check read perm
         if !allowed {
@@ -88,6 +89,12 @@ func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.
 	// read a specific amount of data (dest) from a specific point (offset) in the file
 	// Use the FUSE library's built-in
 	read := fuse.ReadResultFd(uintptr(f.fdesc), offset, len(dest))
+
+    // Update file's atime
+    if herr == fs.OK {
+        now := time.Now()
+        metadata.UpdateTime(fileMetadata, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, nil, nil, false)
+    }
 
 	return read, fs.OK
 }

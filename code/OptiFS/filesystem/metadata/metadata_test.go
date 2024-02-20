@@ -998,3 +998,863 @@ func TestRetrieveNodeInfo(t *testing.T) {
 		})
 	}
 }
+
+// Unit test for EmptyFileIdentifier function in regular_file_metadata_api.go
+func TestEmptyFileIdentifier(t *testing.T) {
+	testcases := []struct {
+		name           string
+		contentHash    [64]byte
+		expectedReturn bool
+	}{
+		{
+			name:           "Default 64byte bool",
+			contentHash:    [64]byte{},
+			expectedReturn: true,
+		},
+		{
+			name:           "Non-default 64byte bool",
+			contentHash:    blake3Hash([]byte("hello")),
+			expectedReturn: false,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			returnValue := EmptyFileIdentifier(tc.contentHash)
+			if returnValue != tc.expectedReturn {
+				t.Fatalf("Expected %v, got %v\n", tc.expectedReturn, returnValue)
+			}
+		})
+	}
+}
+
+// Unit test for TestRetrieveRecent in regular_file_metadata_api.go
+func TestRetrieveRecent(t *testing.T) {
+	testcases := []struct {
+		name           string
+		entryInput     *MapEntry
+		expectedReturn *MapEntryMetadata
+	}{
+		{
+			name: "Succesful retrieval",
+			entryInput: &MapEntry{
+				ReferenceCount: 3,
+				EntryList: map[uint64]*MapEntryMetadata{
+					1: {},                                                    // default
+					2: {},                                                    // default
+					4: {},                                                    // default
+					5: {Path: "one/we/want", Dev: 213, Ino: 54132, Gen: 324}, // The one we're hopeing to retrieve
+				},
+				IndexCounter:    5, // IndexCounter will ALWAYS be equal to or more than ReferenceCount
+				UnderlyingInode: 123,
+			},
+			expectedReturn: &MapEntryMetadata{Path: "one/we/want", Dev: 213, Ino: 54132, Gen: 324},
+		},
+		{
+			name:           "Empty MapEntry",
+			entryInput:     &MapEntry{},
+			expectedReturn: nil,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			returnValue := RetrieveRecent(tc.entryInput)
+
+			if !reflect.DeepEqual(tc.expectedReturn, returnValue) {
+				t.Errorf("Expected %v, got %v\n", tc.expectedReturn, returnValue)
+			}
+		})
+	}
+}
+
+// Unit test for LookupRegularFileMetadata in regular_file_metadata_api.go
+func TestLookupRegularFileMetadata(t *testing.T) {
+	testcases := []struct {
+		name                        string
+		inputHash                   [64]byte
+		inputRef                    uint64
+		regularFileMetadataHashStub map[[64]byte]*MapEntry
+		expectedError               syscall.Errno
+		expectedReturn              *MapEntryMetadata
+	}{
+		{
+			name:      "Succesful lookup",
+			inputHash: blake3Hash([]byte("test hash")),
+			inputRef:  2,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 4,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},                                           // misc entry
+						2: {Path: "one/we/want", Dev: 123, Mode: 15431}, // entry we're retrieving
+						3: {},
+						4: {},
+					},
+				},
+			},
+			expectedError:  fs.OK,
+			expectedReturn: &MapEntryMetadata{Path: "one/we/want", Dev: 123, Mode: 15431},
+		},
+		{
+			name:      "Non existent MapEntryMetadata in existent MapEntry",
+			inputHash: blake3Hash([]byte("test hash")),
+			inputRef:  8,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 4,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},                                           // misc entry
+						2: {Path: "one/we/want", Dev: 123, Mode: 15431}, // entry we're retrieving
+						3: {},
+						4: {},
+					},
+				},
+			},
+			expectedError:  fs.ToErrno(syscall.ENODATA),
+			expectedReturn: nil,
+		},
+		{
+			name:      "Non existent MapEntry",
+			inputHash: blake3Hash([]byte("doesn't exist!")),
+			inputRef:  8,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 4,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},                                           // misc entry
+						2: {Path: "one/we/want", Dev: 123, Mode: 15431}, // entry we're retrieving
+						3: {},
+						4: {},
+					},
+				},
+			},
+			expectedError:  fs.ToErrno(syscall.ENODATA),
+			expectedReturn: nil,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			regularFileMetadataHash = tc.regularFileMetadataHashStub
+			err, returnValue := LookupRegularFileMetadata(tc.inputHash, tc.inputRef)
+
+			if err != tc.expectedError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+			}
+			if !reflect.DeepEqual(returnValue, tc.expectedReturn) {
+				t.Errorf("Expected %v, got %v\n", tc.expectedReturn, returnValue)
+			}
+		})
+	}
+}
+
+// Unit test for LookupRegularFileEntry in regular_file_metadata_api.go
+func TestLookupRegularFileEntry(t *testing.T) {
+	testcases := []struct {
+		name                        string
+		inputHash                   [64]byte
+		regularFileMetadataHashStub map[[64]byte]*MapEntry
+		expectedError               syscall.Errno
+		expectedReturn              *MapEntry
+	}{
+		{
+			name:      "Succesful lookup",
+			inputHash: blake3Hash([]byte("test hash")),
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount:  1,
+					EntryList:       map[uint64]*MapEntryMetadata{},
+					IndexCounter:    123,
+					UnderlyingInode: 485942,
+				}, // One we want
+				blake3Hash([]byte("foo bar")): {}, // Random misc entry
+			},
+			expectedError: fs.OK,
+			expectedReturn: &MapEntry{
+				ReferenceCount:  1,
+				EntryList:       map[uint64]*MapEntryMetadata{},
+				IndexCounter:    123,
+				UnderlyingInode: 485942,
+			},
+		},
+		{
+			name:      "MapEntry doesn't exist",
+			inputHash: blake3Hash([]byte("completely unrelated hash")),
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount:  1,
+					EntryList:       map[uint64]*MapEntryMetadata{},
+					IndexCounter:    123,
+					UnderlyingInode: 485942,
+				}, // One we want
+				blake3Hash([]byte("foo bar")): {}, // Random misc entry
+			},
+			expectedError:  fs.ToErrno(syscall.ENODATA),
+			expectedReturn: nil,
+		},
+		{
+			name:                        "Empty regularFileMetadataHash",
+			inputHash:                   blake3Hash([]byte("completely unrelated hash")),
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{}, // One we want
+			expectedError:               fs.ToErrno(syscall.ENODATA),
+			expectedReturn:              nil,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			regularFileMetadataHash = tc.regularFileMetadataHashStub
+
+			err, returnValue := LookupRegularFileEntry(tc.inputHash)
+
+			if err != tc.expectedError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+			}
+			if !reflect.DeepEqual(returnValue, tc.expectedReturn) {
+				t.Errorf("Expected %v, got %v\n", tc.expectedReturn, returnValue)
+			}
+		})
+	}
+
+}
+
+// Unit test for RemoveRegularFileMetadata in regular_file_metadata_api.go
+func TestRemoveRegularFileMetadata(t *testing.T) {
+	testcases := []struct {
+		name                        string
+		inputHash                   [64]byte
+		inputRef                    uint64
+		regularFileMetadataHashStub map[[64]byte]*MapEntry
+		expectedError               syscall.Errno
+		expectedState               map[[64]byte]*MapEntry
+	}{
+		{
+			name:      "Succesful Deletion",
+			inputHash: blake3Hash([]byte("test hash")),
+			inputRef:  2,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 4,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},                                           // misc entry
+						2: {Path: "one/we/want", Dev: 123, Mode: 15431}, // entry we're deleting
+						3: {},                                           // misc entry
+						4: {},                                           // misc entry
+					},
+					IndexCounter:    4,
+					UnderlyingInode: 123,
+				},
+			},
+			expectedError: fs.OK,
+			expectedState: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 3,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {}, // misc entry
+						3: {},
+						4: {},
+					},
+					IndexCounter:    4,
+					UnderlyingInode: 123,
+				},
+			},
+		},
+		{
+			name:      "Reference number doesn't exist",
+			inputHash: blake3Hash([]byte("test hash")),
+			inputRef:  6,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 4,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},                                           // misc entry
+						2: {Path: "one/we/want", Dev: 123, Mode: 15431}, // misc entry
+						3: {},                                           // misc entry
+						4: {},                                           // misc entry
+					},
+					IndexCounter:    4,
+					UnderlyingInode: 123,
+				},
+			},
+			expectedError: fs.ToErrno(syscall.ENODATA),
+			expectedState: map[[64]byte]*MapEntry{ // Should be the same state
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 4,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},                                           // misc entry
+						2: {Path: "one/we/want", Dev: 123, Mode: 15431}, // misc entry
+						3: {},                                           // misc entry
+						4: {},                                           // misc entry
+					},
+					IndexCounter:    4,
+					UnderlyingInode: 123,
+				},
+			},
+		},
+		{
+			name:      "Hash doesn't exist",
+			inputHash: blake3Hash([]byte("non existing hash")),
+			inputRef:  6,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 4,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},                                           // misc entry
+						2: {Path: "one/we/want", Dev: 123, Mode: 15431}, // misc entry
+						3: {},                                           // misc entry
+						4: {},                                           // misc entry
+					},
+					IndexCounter:    4,
+					UnderlyingInode: 123,
+				},
+			},
+			expectedError: fs.ToErrno(syscall.ENODATA),
+			expectedState: map[[64]byte]*MapEntry{ // Should be the same state
+				blake3Hash([]byte("random")): {}, // Random misc entry
+				blake3Hash([]byte("test hash")): {
+					ReferenceCount: 4,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},                                           // misc entry
+						2: {Path: "one/we/want", Dev: 123, Mode: 15431}, // misc entry
+						3: {},                                           // misc entry
+						4: {},                                           // misc entry
+					},
+					IndexCounter:    4,
+					UnderlyingInode: 123,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			regularFileMetadataHash = tc.regularFileMetadataHashStub
+			err := RemoveRegularFileMetadata(tc.inputHash, tc.inputRef)
+
+			if err != tc.expectedError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+			}
+			if !reflect.DeepEqual(regularFileMetadataHash, tc.expectedState) {
+				t.Errorf("Expected %v, got %v\n", tc.expectedState, regularFileMetadataHash)
+			}
+		})
+	}
+}
+
+// Unit test for RetrieveRegularFileMapEntryFromHashAndRef in regular_file_metadata_api.go
+func TestRetrieveRegularFileMapEntryFromHashAndRef(t *testing.T) {
+	testcases := []struct {
+		name                        string
+		regularFileMetadataHashStub map[[64]byte]*MapEntry
+		inputHash                   [64]byte
+		inputRef                    uint64
+		expectedReturn              *MapEntry
+		expectedError               syscall.Errno
+	}{
+		{
+			name: "Succesful Retrieval",
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random entry")): {},
+				blake3Hash([]byte("one we want")): {
+					ReferenceCount: 3,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},
+						2: {Path: "Retrieve this one!", Mode: 132, Dev: 5},
+						3: {},
+					},
+					IndexCounter:    5,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another random entry")): {},
+			},
+			inputHash: blake3Hash([]byte("one we want")),
+			inputRef:  2,
+			expectedReturn: &MapEntry{
+				ReferenceCount: 3,
+				EntryList: map[uint64]*MapEntryMetadata{
+					1: {},
+					2: {Path: "Retrieve this one!", Mode: 132, Dev: 5},
+					3: {},
+				},
+				IndexCounter:    5,
+				UnderlyingInode: 12345,
+			},
+			expectedError: fs.OK,
+		},
+		{
+			name: "Non existing hash",
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random entry")): {},
+				blake3Hash([]byte("one we want")): {
+					ReferenceCount: 3,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},
+						2: {Path: "Retrieve this one!", Mode: 132, Dev: 5},
+						3: {},
+					},
+					IndexCounter:    5,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another random entry")): {},
+			},
+			inputHash:      blake3Hash([]byte("nonexisting hash")),
+			inputRef:       2,
+			expectedReturn: nil,
+			expectedError:  fs.ToErrno(syscall.ENODATA),
+		},
+		{
+			name: "Non existing refnum",
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random entry")): {},
+				blake3Hash([]byte("one we want")): {
+					ReferenceCount: 3,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},
+						2: {Path: "Retrieve this one!", Mode: 132, Dev: 5},
+						3: {},
+					},
+					IndexCounter:    5,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another random entry")): {},
+			},
+			inputHash:      blake3Hash([]byte("one we want")),
+			inputRef:       7,
+			expectedReturn: nil,
+			expectedError:  fs.ToErrno(syscall.ENODATA),
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			regularFileMetadataHash = tc.regularFileMetadataHashStub
+
+			err, returnValue := RetrieveRegularFileMapEntryFromHashAndRef(tc.inputHash, tc.inputRef)
+
+			if err != tc.expectedError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+			}
+			if !reflect.DeepEqual(returnValue, tc.expectedReturn) {
+				t.Errorf("Expected %v, got %v\n", tc.expectedReturn, returnValue)
+			}
+		})
+	}
+}
+
+// Unit test for RetrieveRegularFileMapEntryAndMetadataFromHashAndRef in regular_file_metadata_api.go
+func TestRetrieveRegularFileMapEntryAndMetadataFromHashAndRef(t *testing.T) {
+	testcases := []struct {
+		name                        string
+		regularFileMetadataHashStub map[[64]byte]*MapEntry
+		inputHash                   [64]byte
+		inputRef                    uint64
+		expectedEntryReturn         *MapEntry
+		expectedMetadataReturn      *MapEntryMetadata
+		expectedError               syscall.Errno
+	}{
+		{
+			name: "Succesful Retrieval",
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random entry")): {},
+				blake3Hash([]byte("one we want")): {
+					ReferenceCount: 3,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},
+						2: {Path: "Retrieve this one!", Mode: 132, Dev: 5},
+						3: {},
+					},
+					IndexCounter:    5,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another random entry")): {},
+			},
+			inputHash: blake3Hash([]byte("one we want")),
+			inputRef:  2,
+			expectedEntryReturn: &MapEntry{
+				ReferenceCount: 3,
+				EntryList: map[uint64]*MapEntryMetadata{
+					1: {},
+					2: {Path: "Retrieve this one!", Mode: 132, Dev: 5},
+					3: {},
+				},
+				IndexCounter:    5,
+				UnderlyingInode: 12345,
+			},
+			expectedMetadataReturn: &MapEntryMetadata{
+				Path: "Retrieve this one!", Mode: 132, Dev: 5},
+			expectedError: fs.OK,
+		},
+		{
+			name: "Non existing hash",
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random entry")): {},
+				blake3Hash([]byte("one we want")): {
+					ReferenceCount: 3,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},
+						2: {Path: "Retrieve this one!", Mode: 132, Dev: 5},
+						3: {},
+					},
+					IndexCounter:    5,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another random entry")): {},
+			},
+			inputHash:              blake3Hash([]byte("nonexisting hash")),
+			inputRef:               2,
+			expectedEntryReturn:    nil,
+			expectedMetadataReturn: nil,
+			expectedError:          fs.ToErrno(syscall.ENODATA),
+		},
+		{
+			name: "Non existing refnum",
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random entry")): {},
+				blake3Hash([]byte("one we want")): {
+					ReferenceCount: 3,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1: {},
+						2: {Path: "Retrieve this one!", Mode: 132, Dev: 5},
+						3: {},
+					},
+					IndexCounter:    5,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another random entry")): {},
+			},
+			inputHash:              blake3Hash([]byte("one we want")),
+			inputRef:               7,
+			expectedEntryReturn:    nil,
+			expectedMetadataReturn: nil,
+			expectedError:          fs.ToErrno(syscall.ENODATA),
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			regularFileMetadataHash = tc.regularFileMetadataHashStub
+
+			err, returnEntryValue, returnMetadataValue := RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(tc.inputHash, tc.inputRef)
+
+			if err != tc.expectedError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+			}
+			if !reflect.DeepEqual(returnEntryValue, tc.expectedEntryReturn) {
+				t.Errorf("Expected %v, got %v\n", tc.expectedEntryReturn, returnEntryValue)
+			}
+			if !reflect.DeepEqual(returnMetadataValue, tc.expectedMetadataReturn) {
+				t.Errorf("Expected %v, got %v\n", tc.expectedMetadataReturn, returnMetadataValue)
+			}
+		})
+	}
+}
+
+// Unit test for UpdateFullRegularFileMetadata in regular_file_metadata_api.go
+func TestUpdateFullRegularFileMetadata(t *testing.T) {
+
+	tmpDir := t.TempDir()
+
+	testCases := []struct {
+		name                        string
+		filePath                    string
+		inputUnstableAttr           *syscall.Stat_t
+		inputStableAttr             *fs.StableAttr
+		inputHash                   [64]byte
+		inputRef                    uint64
+		regularFileMetadataHashStub map[[64]byte]*MapEntry
+		expectedError               syscall.Errno
+		expectedReturn              map[[64]byte]*MapEntry
+	}{
+		{
+			name:              "Succesful update",
+			filePath:          tmpDir + "/file1",
+			inputUnstableAttr: &syscall.Stat_t{},
+			inputStableAttr:   &fs.StableAttr{Ino: 123456, Gen: 0, Mode: 0},
+			inputHash:         blake3Hash([]byte("we want this one")),
+			inputRef:          6,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")):         {},
+				blake3Hash([]byte("another random")): {},
+				blake3Hash([]byte("we want this one")): {
+					ReferenceCount: 7,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1:  {},
+						2:  {},
+						4:  {},
+						5:  {},
+						6:  {},
+						9:  {},
+						12: {},
+					},
+					IndexCounter:    12,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another misc")): {},
+			},
+			expectedReturn: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")):         {},
+				blake3Hash([]byte("another random")): {},
+				blake3Hash([]byte("we want this one")): {
+					ReferenceCount: 7,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1:  {},
+						2:  {},
+						4:  {},
+						5:  {},
+						6:  {},
+						9:  {},
+						12: {},
+					},
+					IndexCounter:    12,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another misc")): {},
+			},
+			expectedError: fs.OK,
+		},
+		{
+			name:              "Non-existent hash",
+			filePath:          tmpDir + "/file2",
+			inputUnstableAttr: &syscall.Stat_t{},
+			inputStableAttr:   &fs.StableAttr{Ino: 123456, Gen: 0, Mode: 0},
+			inputHash:         blake3Hash([]byte("doesn't exist")),
+			inputRef:          6,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")):         {},
+				blake3Hash([]byte("another random")): {},
+				blake3Hash([]byte("we want this one")): {
+					ReferenceCount: 7,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1:  {},
+						2:  {},
+						4:  {},
+						5:  {},
+						6:  {},
+						9:  {},
+						12: {},
+					},
+					IndexCounter:    12,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another misc")): {},
+			},
+			expectedReturn: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")):         {},
+				blake3Hash([]byte("another random")): {},
+				blake3Hash([]byte("we want this one")): {
+					ReferenceCount: 7,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1:  {},
+						2:  {},
+						4:  {},
+						5:  {},
+						6:  {},
+						9:  {},
+						12: {},
+					},
+					IndexCounter:    12,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another misc")): {},
+			},
+			expectedError: fs.ToErrno(syscall.ENODATA),
+		},
+		{
+			name:              "Non-existent refnum",
+			filePath:          tmpDir + "/file3",
+			inputUnstableAttr: &syscall.Stat_t{},
+			inputStableAttr:   &fs.StableAttr{Ino: 123456, Gen: 0, Mode: 0},
+			inputHash:         blake3Hash([]byte("we want this one")),
+			inputRef:          3,
+			regularFileMetadataHashStub: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")):         {},
+				blake3Hash([]byte("another random")): {},
+				blake3Hash([]byte("we want this one")): {
+					ReferenceCount: 7,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1:  {},
+						2:  {},
+						4:  {},
+						5:  {},
+						6:  {},
+						9:  {},
+						12: {},
+					},
+					IndexCounter:    12,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another misc")): {},
+			},
+			expectedError: fs.ToErrno(syscall.ENODATA),
+			expectedReturn: map[[64]byte]*MapEntry{
+				blake3Hash([]byte("random")):         {},
+				blake3Hash([]byte("another random")): {},
+				blake3Hash([]byte("we want this one")): {
+					ReferenceCount: 7,
+					EntryList: map[uint64]*MapEntryMetadata{
+						1:  {},
+						2:  {},
+						4:  {},
+						5:  {},
+						6:  {},
+						9:  {},
+						12: {},
+					},
+					IndexCounter:    12,
+					UnderlyingInode: 12345,
+				},
+				blake3Hash([]byte("another misc")): {},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.filePath, func(t *testing.T) {
+
+			regularFileMetadataHash = testCase.regularFileMetadataHashStub
+
+			// Prepare file descriptor 'fd' ...
+			fd, err := syscall.Creat(testCase.filePath, 666)
+			if err != nil {
+				t.Fatalf("Failed to create file - %v\n", err)
+			}
+			syscall.Fstat(fd, testCase.inputUnstableAttr)
+
+			expected := generateExpectedMetadata(testCase.inputUnstableAttr, testCase.inputStableAttr, testCase.filePath)
+			err2 := UpdateFullRegularFileMetadata(testCase.inputHash, testCase.inputRef, testCase.inputUnstableAttr, testCase.inputStableAttr, testCase.filePath)
+
+			if err2 != testCase.expectedError {
+				t.Errorf("Expected %v, got %v\n", testCase.expectedError, err2)
+			}
+
+			if testCase.expectedError == fs.OK {
+				testCase.expectedReturn[testCase.inputHash].EntryList[testCase.inputRef] = expected
+			}
+			if !reflect.DeepEqual(testCase.expectedReturn, regularFileMetadataHash) {
+				t.Errorf("Expected %v, got %v\n", testCase.expectedReturn, regularFileMetadataHash)
+			}
+		})
+	}
+}
+
+// Unit tests for MigrateRegularFileMetadata in regular_file_metadata_api.go
+func TestMigrateRegularFileMetadata(t *testing.T) {
+	testcases := []struct {
+		name              string
+		inputOldMetadata  *MapEntryMetadata
+		inputNewMetadata  *MapEntryMetadata
+		inputUnstableAttr *syscall.Stat_t
+		expectedReturn    *MapEntryMetadata
+		expectedError     syscall.Errno
+	}{
+		{
+            name: "Succesful update",
+            inputOldMetadata: &MapEntryMetadata{
+                Path: "old/path",
+                Mode: 9430,
+                Dev: 5,
+                Gen: 2,
+                Ino: 823740,
+                Uid: 1000,
+                Gid: 1000,
+                Rdev: 12,
+                Size: 24353,
+                Blocks: 44,
+                Blksize: 4096,
+                XAttr: map[string][]byte{
+                    "old": []byte("data"),
+                },
+                Nlink: 1,
+                Atim: syscall.Timespec{Sec: 12, Nsec: 43},
+                Mtim: syscall.Timespec{Sec: 12, Nsec: 43},
+                Ctim: syscall.Timespec{Sec: 2, Nsec: 3},
+                X__pad0: 99,
+                X__unused: [3]int64{0, 0, 0},
+            },
+            inputNewMetadata: &MapEntryMetadata{
+                Path: "new/path",
+                Mode: 349,
+                Dev: 5,
+                Gen: 3,
+                Ino: 823740,
+                Uid: 1000,
+                Gid: 1000,
+                Rdev: 12,
+                Size: 32454,
+                Blocks: 48,
+                Blksize: 4096,
+                XAttr: map[string][]byte{},
+                Nlink: 1,
+                Atim: syscall.Timespec{Sec: 16, Nsec: 49},
+                Mtim: syscall.Timespec{Sec: 16, Nsec: 49},
+                Ctim: syscall.Timespec{Sec: 2, Nsec: 3},
+                X__pad0: 99,
+                X__unused: [3]int64{0, 0, 0},
+            },
+            inputUnstableAttr: &syscall.Stat_t{
+                Dev: 21,
+                Ino: 12435,
+                Atim: syscall.Timespec{Sec: 22, Nsec: 32},
+                Mtim: syscall.Timespec{Sec: 22, Nsec: 32},
+                Ctim: syscall.Timespec{Sec: 12, Nsec: 32},
+                Nlink: 3,
+                Uid: 123,
+                Gid: 123,
+                Mode: 534,
+                Blksize: 3243,
+                Blocks: 23,
+                Size: 5432,
+                Rdev: 1,
+                X__unused: [3]int64{1,2,3},
+                X__pad0: 32,
+            },
+            expectedError: fs.OK,
+            expectedReturn: &MapEntryMetadata{
+                Path: "old/path",
+                Gen: 2,
+                Mode: 9430,
+                Ctim: syscall.Timespec{Sec: 2, Nsec: 3},
+                Uid: 1000,
+                Gid: 1000,
+                Dev: 5,
+                Ino: 823740,
+                XAttr: map[string][]byte{
+                    "old": []byte("data"),
+                },
+                Atim: syscall.Timespec{Sec: 22, Nsec: 32},
+                Mtim: syscall.Timespec{Sec: 22, Nsec: 32},
+                Rdev: 1,
+                Nlink: 3,
+                Size: 5432,
+                Blksize: 3243,
+                Blocks: 23,
+                X__unused: [3]int64{1,2,3},
+                X__pad0: 32,
+            },
+        },
+	}
+
+    for _, tc := range testcases {
+        t.Run(tc.name, func(t *testing.T) {
+            err := MigrateRegularFileMetadata(tc.inputOldMetadata, tc.inputNewMetadata, tc.inputUnstableAttr)
+
+            if err != tc.expectedError {
+                t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+            }
+            if !reflect.DeepEqual(tc.inputNewMetadata, tc.expectedReturn) {
+                t.Errorf("Expected %v, got %v\n", tc.expectedReturn, tc.inputNewMetadata)
+            }
+        })
+    }
+}

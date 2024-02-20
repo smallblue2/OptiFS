@@ -10,6 +10,7 @@ import (
 	"log"
 	"os/user"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -34,6 +35,7 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 		hasWrite = permissions.CheckPermissions(ctx, customMetadata, 1)
 		log.Printf("Has write perm: {%v}\n", hasWrite)
 		path = customMetadata.Path
+
 	} else {
 		log.Println("No custom metadata!")
 		path = n.RPath()
@@ -51,6 +53,8 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 			}
 			// Try and modify our custom metadata system first
 			metadata.UpdateMode(customMetadata, &mode, isDir)
+            // Increment the gen when we enter SetAttr to signify a change
+            metadata.UpdateGenNumber(customMetadata, isDir)
 			log.Println("Set custom mode")
 			// Otherwise, just handle the underlying node
 		} else {
@@ -115,6 +119,8 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				saferGID = &tmp
 			}
 			metadata.UpdateOwner(customMetadata, saferUID, saferGID, isDir)
+            // Increment the gen when we enter SetAttr to signify a change
+            metadata.UpdateGenNumber(customMetadata, isDir)
 			log.Println("Set custom UID & GID")
 			// Otherwise, just update the underlying node instead
 		} else {
@@ -140,11 +146,13 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 	// Same thing for modification and access times
 	mtime, mok := in.GetMTime()
 	atime, aok := in.GetATime()
+    ctime, cok := in.GetCTime()
 	if mok || aok {
 		log.Println("Setting time")
 		// Initialize pointers to the time values
 		ap := &atime
 		mp := &mtime
+        cp := &ctime
 		// Take into account if access of mod times are not both provided
 		if !aok {
 			ap = nil
@@ -152,13 +160,17 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 		if !mok {
 			mp = nil
 		}
+        if !cok {
+            cp = nil
+        }
 
 		// Create an array to hold timespec values for syscall
 		// This is a data structure that represents a time value
 		// with precision up to nanoseconds
-		var times [2]syscall.Timespec
+		var times [3]syscall.Timespec
 		times[0] = fuse.UtimeToTimespec(ap)
 		times[1] = fuse.UtimeToTimespec(mp)
+        times[2] = fuse.UtimeToTimespec(cp)
 
 		// Try and update our own custom metadata system first
 		if customMetadata != nil {
@@ -167,7 +179,9 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				log.Println("User doesn't have permission to change time!")
 				return syscall.EACCES
 			}
-			metadata.UpdateTime(customMetadata, &times[0], &times[1], nil, isDir)
+			metadata.UpdateTime(customMetadata, &times[0], &times[1], &times[2], isDir)
+            // Increment the gen when we enter SetAttr to signify a change
+            metadata.UpdateGenNumber(customMetadata, isDir)
 			log.Println("Set custom time")
 			// OTHERWISE update the underlying file
 		} else {
@@ -203,6 +217,8 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 			}
 			tmp := int64(size)
 			metadata.UpdateSize(customMetadata, &tmp, isDir)
+            // Increment the gen when we enter SetAttr to signify a change
+            metadata.UpdateGenNumber(customMetadata, isDir)
 			log.Println("Updated custom size")
 		} else {
 			if n != nil { // Update the underlying node if available
@@ -242,6 +258,12 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 		}
 		out.FromStat(&stat)
 	}
+
+    // Update change time
+    if customMetadata != nil {
+        now := time.Now()
+        metadata.UpdateTime(customMetadata, nil, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, isDir)
+    }
 
 	return fs.OK
 }
@@ -356,7 +378,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		log.Println("Created existing InodeEmbedder!")
 
 		cerr, customMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
-		if cerr != nil {
+		if cerr != fs.OK {
 			// Must be an empty or special file
 			log.Println("Must be an empty or special file")
 			// TODO: Do we need to do anything special here?
