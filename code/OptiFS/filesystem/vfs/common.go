@@ -194,7 +194,7 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				log.Println("Updated underlying NODE time")
 			}
 			if f != nil {
-				// BELOW LINE IS FROM `fs` package, hanwen - TODO: REFERENCE PROPERLY
+                // Line below is from github user Hanwen's go-fuse/fuse/nodefs/syscall_linux.go
 				_, _, err := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(f.fdesc), 0, uintptr(unsafe.Pointer(&times)), uintptr(0), 0, 0)
 				err = syscall.Errno(err)
 				if err != 0 {
