@@ -35,7 +35,7 @@ First-Party packages are custom packages developed by the development team solel
 #### 2.1.1 Filesystem
 
 ##### 2.1.1.1 Description
-The filesystem package is the overall system as a whole. It is the highest-level package and contents the project in its entirety. The filesystem package contains all first-party packages underneath, and most importantly the main.go file - which is the entrypoint for the program.
+The filesystem package is the overall system as a whole. It is the highest-level package and contents the project in its entirety. The filesystem package contains all first-party packages underneath, and most importantly the `main.go` file - which is the entrypoint for the program.
 ##### 2.1.1.2 Responsibilities
 Its responsibilities consist of all high-level operations in the filesystem program;
 
@@ -61,7 +61,7 @@ It is responsible for the hashing of file content.
 #### 2.1.3 VFS
 
 ##### 2.1.3.1 Description
-VFS (Virtual FileSystem) is a substantial and large package in our system that represents the filesystem and FUSE functionality of the program. Primary files consist of a node.go which represents a node and all node operations in our FUSE filesystem, and file.go which represents a file handle (file descriptor) in our FUSE filesystem and all file handle operations.
+VFS (Virtual FileSystem) is a substantial and large package in our system that represents the filesystem and FUSE functionality of the program. Primary files consist of a `node.go` which represents a node and all node operations in our FUSE filesystem, and `file.go` which represents a file handle (file descriptor) in our FUSE filesystem and all file handle operations.
 
 ##### 2.1.3.2 Responsibilities
 This package is responsible for simulating a filesystem. It intercepts filesystem syscalls and performs operations as defined by the VFS package.
@@ -82,7 +82,7 @@ This package is responsible for simulating a filesystem. It intercepts filesyste
 #### 2.1.4 Permissions
 
 ##### 2.1.4.1 Description
-The permissions package consists of our custom permissions system which handles and defines security and access to resources (nodes) in our FUSE filesystem. All of these checks can be found in the permissions.go file. Alongside this, there is a file named sysadmin.go, which monitors the sysadmin role and any updates to it. This is a vital part of the system, as OptiFS is designed so that it can only be run by a known sysadmin, and known sysadmins are the only users who can perform operations in the root directory.
+The permissions package consists of our custom permissions system which handles and defines security and access to resources (nodes) in our FUSE filesystem. All of these checks can be found in the `permissions.go` file. Alongside this, there is a file named `sysadmin.go`, which monitors the sysadmin role and any updates to it. This is a vital part of the system, as OptiFS is designed so that it can only be run by a known sysadmin, and known sysadmins are the only users who can perform operations in the root directory.
 
 ##### 2.1.4.2 Responsibilities
 This package is responsible for checking access of files and directories, and handling sysadmin operations.
@@ -118,7 +118,7 @@ This is used to interface with FUSE.
 #### 2.2.2 x/sys/unix
 This community-driven packge provides access to the raw system call interface of the underlying operating system.
 
-We use this for our atomic rename exchange, using the Renameat2 syscall and RENAME_EXCHANGE flag.
+We use this for our atomic rename exchange, using the `Renameat2` syscall and `RENAME_EXCHANGE` flag.
 
 #### 2.2.3 lukechampine.com/blake3
 An implementation of the BLAKE3 cryptographic hash function in Go.
@@ -200,7 +200,7 @@ Writing this software proved to be the most challenging project either of us hav
 ### 4.1 Basic FUSE Implementation
 
 #### 4.1.1 Problem
-We were quite naive going into this project as we were completely unaware of FUSE or what a virtual filesystem was and we especially lacked expertise in how filesystems operated, so just coming to grips with FUSE actually possibly took a month or more. This was especially due to our Go bindings for FUSE containing lackluster documentation and often being different enough in certain areas to often invalidate the libfuse documentation.
+We were quite naive going into this project as we were completely unaware of FUSE or what a virtual filesystem was and we especially lacked expertise in how filesystems operated, so just coming to grips with FUSE actually possibly took a month or more. This was especially due to our Go bindings for FUSE containing lacklustre documentation and often being different enough in certain areas to often invalidate the libfuse documentation.
 
 #### 4.1.2 Resolution
 We followed multiple different examples, like an ‘in-memory’ filesystem, to get to grips with how it works. We also started to become familiar with FUSE as a technology, and specifically its documentation.
@@ -234,7 +234,7 @@ In order to get FUSE to be correctly shared over NFS, you must;
  - Mount your FUSE filesystem in your shared directory BEFORE starting the NFS service.
  - Ensure your FUSE filesystem isn’t mounted at the root of the directory being shared over NFS.
  - Ensure you are using NFSv4, older versions of NFS do not support FUSE.
- - Ensure you are using the crossmnt or nohide config setting to allow the traversal of other filesystems mounted within the exported directory.
+ - Ensure you are using the `crossmnt` or `nohide` config setting to allow the traversal of other filesystems mounted within the exported directory.
 
 ### 4.4 Content Deduplication
 
@@ -264,7 +264,7 @@ We then realised the flaw in our implementation. When you create a duplicate fil
 
 We fixed this by only instantiating a virtual node once, and then storing its data in a persistent store. We then instead query the persistent store for node information during instantiation, as opposed to relying on the underlying node.
 
-This fixed our problem, and ensured unique virtual nodes irregardless of underlying nodes being hardlinked or not.
+This fixed our problem, and ensured unique virtual nodes regardless of underlying nodes being hardlinked or not.
 
 ### 4.6 Lack of Directory Permissions
 
@@ -288,9 +288,9 @@ We discovered late into the project that large files completely crashed our file
 #### 4.7.2 Resolution
 In our Write syscall implementation, we originally hashed the content being written and checked if it already existed, and then continued to either perform deduplication if it wasn’t unique, or simply allow the write if it was unique, and then create custom metadata for the file through this hash.
 
-What we didn’t anticipate - for some reason - is that this works perfectly for small files that required one write. But when files are large, they are written to in blocks, and this will cause FUSE’s Write syscall to be called many times, depending on the block size of your filesystem I believe. For example, a 10gb file that we tested required 80,000 writes before it’s file descriptor was released.
+What we didn’t anticipate - for some reason - is that this works perfectly for small files that require one write. But when files are large, they are written to in blocks, and this will cause FUSE’s Write syscall to be called many times, depending on the block size of your filesystem I believe. For example, a 10gb file that we tested required 80,000 writes before its file descriptor was released.
 
-We fixed this by moving the deduplication logic to when we close a file descriptor, in Release. This also required us to be more creative with how we generate the hash for the file’s content, we solved this by simply hashing each block written to disk, storing it in a buffer, and then hashing the entire buffer in Release. This prevented the entire content of a file being required to be loaded into memory to hash it, and it also ensured determinism, speed and efficiency.
+We fixed this by moving the deduplication logic to when we close a file descriptor, in Release. This also required us to be more creative with how we generate the hash for the file’s content. We solved this by simply hashing each block written to disk, storing it in a buffer, and then hashing the entire buffer in Release. This prevented the entire content of a file being required to be loaded into memory to hash it, and it also ensured determinism, speed and efficiency.
 
 This also introduced another problem where we were performing deduplication on all file descriptor closes, including ones for reads and executions. So we simply check the original open flags for writing intent, and perform deduplication only if the original file descriptor was used to perform writes.
 
