@@ -82,34 +82,36 @@ filesystem <flags> <mount_point> <underlying_filesystem>
 
 
 ### 2.1 Specify Mount Point
-OptiFS requires a mount point, where the actual virtual filesystem will run. This is what the normal users of the filesystem will see, and is specified with the `<mount_point>` argument.
+OptiFS requires a mount point, where the virtual filesystem will run. This is where you will interact with OptiFS, and is specified with the `<mount_point>` argument.
 
 
 ### 2.2 Specify Underlying Filesystem
 Optifs requires an underlying filesystem to be mounted on top of. This is specified with the `<underlying_filesystem>` argument.
 
+This is where your data will actually be stored on disk, but will not reflect correct node metadata. All nodes in the underlying filesystem will be owned by the sysadmin.
+
 
 ### 2.3 Flags
-Flags are built-in options for running the filesystem. OptiFS has six flags to choose from:
+Flags are built-in options for running the filesystem. OptiFS has seven flags to choose from:
 
 ```sh
 usage: filesystem <mountpoint> <underlying filesystem>
 
 options:
   -change-sysadmin-gid string
-   	 changes the sysadmin group of the system
+    	changes the sysadmin group of the system
   -change-sysadmin-uid string
-   	 changes the sysadmin (through UID) of the system
+    	changes the sysadmin (through UID) of the system
   -debug
-   	 enter debug mode
+    	enter debug mode
   -disable-icheck
-   	 disables the integrity check of the persistent data of the filesystem
-  -rm-persistence
-   	 remove persistence saving (saving of virtual node metadata)
-  -save string
-   	 choose the location of saved hashmaps and sysadmin info  
+    	disables the integrity check of the persistent data of the filesystem
   -interval int
-     defines an amount of time that the system will regularly save persistent stores
+    	defines an amount of time that the system will regularly save persistent stores (default 30)
+  -rm-persistence
+    	remove persistence saving (saving of virtual node metadata)
+  -save string
+    	choose the location of saved hashmaps and sysadmin info
 ```
 
 #### 2.3.1 -change-sysadmin-gid
@@ -119,19 +121,23 @@ This flag is used to change the sysadmin group ID. An example usage would be `ch
 This flag is used to change the sysadmin user ID. An example usage would be `change-sysadmin-uid=1000`
 
 #### 2.3.3 -debug
-This flag, if set, enables logging from the Go Fuse package. This shows information about all kernel requests and replies.
+This flag, if set, enables low-level logging from the Go Fuse bindings package. This shows information about all kernel requests and replies.
 
 #### 2.3.4 -disable-icheck
-This flag, if set, doesn’t check the integrity of persistent data of the filesystem. This will not let OptiFS update its own metadata storage if the state of the underlying filesystem has changed.
+This flag, if set, doesn’t check the integrity of persistent data of the filesystem. This will not let OptiFS update its own metadata storage if the state of the underlying filesystem has changed between filesystem instances.
 
 #### 2.3.5 -rm-persistence
-This flag, if set, will remove persistent saving of virtual node metadata, and sysadmin information.
+This flag, if set, will prevent OptiFS from saving its state.
+
+By default, OptiFS saves node metadata and sysadmin information to allow the state of your filesystem to span multiple instances.
 
 #### 2.3.6 -save
-This flag allows you to choose where exactly you want persistent data to be stored. If not set, OptiFS provides a default location to store this data, and sets the permissions to `0700`.
+This flag allows you to choose where exactly you want persistent data to be stored. If not set, OptiFS provides a default location to store this data, and sets the permissions to `0700` and the owner as the original sysadmin.
+
+If you wish to change the sysadmin UID or GID, ensure they have access to the save location.
 
 #### 2.3.7 -interval
-This flag allows the user to set an interval (in seconds). This interval sets the amount of time between saves of the persistent data. If not set explicitly by the user, the interval defaults to 30 seconds.
+This flag allows the user to set an interval (in seconds). This interval sets the amount of time between automatic saves of the persistent data. If not set explicitly by the user, the interval defaults to 30 seconds.
 
 ## 3. Sysadmin Operations
 
@@ -148,7 +154,9 @@ An example of how this might be done can be seen below:
 
 
 ### 3.2 Persistent Storage Save Location
-It is also the role of a sysadmin to set where the persistent store is being saved to. Although we do have a default directory set to save into, the only people who can access this directory are users with root privilege, no matter what. It is up to a sysadmin to change who is allowed to access this information, especially when changing sysadmin UID or GIDs.
+It is also the role of a sysadmin to set where the persistent store is being saved to. Although we do have a default directory set to save into, the only people who can access this directory by default is the original sysadmin.
+
+It is up to a sysadmin to change who is allowed to access this information, especially when changing sysadmin UID or GIDs.
 
 An example of how this might be done can be seen below:
 
@@ -156,6 +164,7 @@ An example of how this might be done can be seen below:
 2. Sysadmin then updates permissions to storage_save directory, for example `chown :sysadmins storage_save`
 3. Now all sysadmins can access this persistent storage.
 
+This is vital, as running the filesystem also requires access to the persistent store directory.
 
 ## 4. Mounting Over NFSv4
 Firstly, download NFS for your desired distribution and purpose:
@@ -185,15 +194,20 @@ As OptiFS is a virtual filesystem, it is operated just like any other filesystem
 * touch
 * rm
 * echo
+* setfattr
+* getfattr
+* link
 
 ## 6. Shutting Down OptiFS
 
 ### 6.1 Shutting Down Locally
 To shut down OptiFS locally, simply run the following command:
 ```sh
-sudo umount <mount_point>
+umount <mount_point>
 ```
 Where mount_point is the mount point specified at runtime.
+
+The filesystem must not be occupied, as unmounting will fail.
 
 
 ### 6.1 Shutting Down over NFSv4
