@@ -49,7 +49,6 @@ var _ = (fs.FileHandle)((*OptiFSFile)(nil))
 var _ = (fs.FileReader)((*OptiFSFile)(nil))    // reading a file
 var _ = (fs.FileFsyncer)((*OptiFSFile)(nil))   // Ensuring things are written to disk
 var _ = (fs.FileFlusher)((*OptiFSFile)(nil))   // Flushes the file
-//var _ = (fs.FileGetattrer)((*OptiFSFile)(nil)) // get attrs of a file
 var _ = (fs.FileReleaser)((*OptiFSFile)(nil))  // release (close) a file
 var _ = (fs.FileGetlker)((*OptiFSFile)(nil))   // find conflicting locks for given lock
 var _ = (fs.FileSetlker)((*OptiFSFile)(nil))   // gets a lock on a file
@@ -99,6 +98,7 @@ func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.
 	return read, fs.OK
 }
 
+// Performs an FSYNC on the underlying filesystem's filedescriptor
 func (f *OptiFSFile) Fsync(ctx context.Context, flags uint32) syscall.Errno {
 	// Gain access to the mutex lock
 	f.mu.Lock()
@@ -108,12 +108,14 @@ func (f *OptiFSFile) Fsync(ctx context.Context, flags uint32) syscall.Errno {
 	return fs.ToErrno(syscall.Fsync(f.fdesc))
 }
 
+// Performs an Flush on the underlying filesystem's file
 func (f *OptiFSFile) Flush(ctx context.Context) syscall.Errno {
 	// Gain access to the mutex lock
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// In order to force FUSE to flush, we will dup the filedescriptor and then close it
+	// In order to force FUSE to flush without losing the file descriptor, 
+    // we will dup the filedescriptor and then close it
 	tmpfd, err := syscall.Dup(f.fdesc)
 	if err != nil {
 		return fs.ToErrno(err)
@@ -148,6 +150,8 @@ func (f *OptiFSFile) Release(ctx context.Context) syscall.Errno {
 }
 
 // gets the status' of locks on a file
+//
+// From github user's Hanwen's go-fuse/fs/files.go
 func (f *OptiFSFile) Getlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) syscall.Errno {
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited
@@ -165,6 +169,8 @@ func (f *OptiFSFile) Getlk(ctx context.Context, owner uint64, lk *fuse.FileLock,
 }
 
 // gets a lock on a file, if it can't get the lock it fails
+//
+// From github user's Hanwen's go-fuse/fs/files.go
 func (f *OptiFSFile) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited
@@ -196,6 +202,8 @@ func (f *OptiFSFile) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock,
 }
 
 // gets a lock on a file, if it can't get the lock then it waits for the lock to be obtainable
+//
+// From github user's Hanwen's go-fuse/fs/files.go
 func (f *OptiFSFile) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited

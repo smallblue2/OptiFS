@@ -1308,7 +1308,6 @@ func (n *OptiFSNode) Getlk(ctx context.Context, f fs.FileHandle, owner uint64, l
 	if f != nil {
 		return f.(fs.FileGetlker).Getlk(ctx, owner, lk, flags, out) // send it if filehandle exists
 	}
-	//log.Println("GETLK - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
@@ -1317,7 +1316,6 @@ func (n *OptiFSNode) Setlk(ctx context.Context, f fs.FileHandle, owner uint64, l
 	if f != nil {
 		return f.(fs.FileSetlker).Setlk(ctx, owner, lk, flags) // send it if filehandle exists
 	}
-	//log.Println("SETLK - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
@@ -1327,12 +1325,10 @@ func (n *OptiFSNode) Setlkw(ctx context.Context, f fs.FileHandle, owner uint64, 
 	if f != nil {
 		return f.(fs.FileSetlkwer).Setlkw(ctx, owner, lk, flags) // send it if filehandle exists
 	}
-	//log.Println("SETLKW - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
 // Moves a node to a different directory. Change is only reflected in the filetree IFF returns fs.OK
-// From go-fuse/fs/loopback.go
 func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
 
 	log.Println("Entered RENAME")
@@ -1433,7 +1429,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 
 // Handles the name exchange of two inodes
 //
-// Adapted from go-fuse/fs/loopback.go
+// Adapted from github user Hanwen's go-fuse/fs/loopback.go implementation
 func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, newName string) syscall.Errno {
 	// Open the directory of the current node
 
@@ -1458,15 +1454,8 @@ func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 	defer syscall.Close(currDirFd)
 	log.Println("Opened newParentDir")
 
-	// Get the directory status for data integrity checks
-	//var st syscall.Stat_t
-	//if err := syscall.Fstat(currDirFd, &st); err != nil {
-	//    log.Printf("Error3 - %v\n", err)
-	//	return fs.ToErrno(err)
-	//}
-	// As the additional check below was removed we don't need this, best to keep it irregardless though
-
 	inode := &n.Inode
+
 	// Check to see if the user is trying to move the root directory, and that the inode number
 	// is the same from the Fstat - ensuring the current directory hasn't been moved or modified.
 	//
@@ -1486,11 +1475,13 @@ func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 	// As the additional check below was removed we don't need this, best to keep it irregardless though
 
 	newParentDirInode := newparent.EmbeddedInode()
+
 	// Ensure that the new directory isn't the root node, and that the inodes match up, same
 	// consistency checks as above
 	//
 	// REMOVED: 'newParentDirInode.StableAttr().Ino != n.RootNode.getStableAttr(&st, &newParentDirPath).Ino' in this check
 	//          due to our custom attribute storage making it inaccurate - Do we need to replace this?
+
 	if newParentDirInode.Root() != newParentDirInode {
 		log.Println("Check 2 failed")
 		return syscall.EBUSY
