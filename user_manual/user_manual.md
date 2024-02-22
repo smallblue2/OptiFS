@@ -16,6 +16,7 @@
     - [2.3.4 -disable-icheck](#234--disable-icheck)
     - [2.3.5 -rm-persistence](#235--rm-persistence)
     - [2.3.6 -save](#236--save)
+    - [2.3.7 -interval](#237--interval)
 - [3. Sysadmin Operations](#3-sysadmin-operations)
   - [3.1 Root Access](#31-root-access)
   - [3.2 Persistent Storage Save Location](#32-persistent-storage-save-location)
@@ -106,7 +107,9 @@ options:
   -rm-persistence
    	 remove persistence saving (saving of virtual node metadata)
   -save string
-   	 choose the location of saved hashmaps and sysadmin info
+   	 choose the location of saved hashmaps and sysadmin info  
+  -interval int
+     defines an amount of time that the system will regularly save persistent stores
 ```
 
 #### 2.3.1 -change-sysadmin-gid
@@ -126,6 +129,9 @@ This flag, if set, will remove persistent saving of virtual node metadata, and s
 
 #### 2.3.6 -save
 This flag allows you to choose where exactly you want persistent data to be stored. If not set, OptiFS provides a default location to store this data, and sets the permissions to `0700`.
+
+#### 2.3.7 -interval
+This flag allows the user to set an interval (in seconds). This interval sets the amount of time between saves of the persistent data. If not set explicitly by the user, the interval defaults to 30 seconds.
 
 ## 3. Sysadmin Operations
 
