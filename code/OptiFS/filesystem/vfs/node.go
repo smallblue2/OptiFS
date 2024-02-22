@@ -84,8 +84,8 @@ var _ = (fs.NodeSetlkwer)((*OptiFSNode)(nil)) // gets a lock on a node, waits fo
 var _ = (fs.NodeRenamer)((*OptiFSNode)(nil))  // Changes the directory a node is in
 var _ = (fs.NodeMknoder)((*OptiFSNode)(nil))  // Similar to lookup, but creates the inode
 var _ = (fs.NodeLinker)((*OptiFSNode)(nil))   // For handling hard links
-// var _ = (fs.NodeSymlinker)((*OptiFSNode)(nil))  // For handling hard links
-// var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil)) // For reading symlinks
+var _ = (fs.NodeSymlinker)((*OptiFSNode)(nil))  // For handling hard links
+var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil)) // For reading symlinks
 
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
@@ -1609,68 +1609,68 @@ func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name str
 	return oNode, oErr
 }
 
-//func (n *OptiFSNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
-//
-//	// Check write and execute permissions on the target directory
-//	err1, dirMetadata := metadata.LookupDirMetadata(target)
-//	if err1 == nil {
-//		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-//		if !hasWrite {
-//			return nil, fs.ToErrno(syscall.EACCES)
-//		}
-//		hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
-//		if !hasExec {
-//			return nil, fs.ToErrno(syscall.EACCES)
-//		}
-//	}
-//
-//	// Construct the paths
-//	sourcePath := filepath.Join(n.RootNode.Path, target)
-//	targetPath := filepath.Join(n.RPath(), name)
-//
-//	// Perform the hardlink in the underlying file system
-//	if err := syscall.Symlink(sourcePath, targetPath); err != nil {
-//		return nil, fs.ToErrno(err)
-//	}
-//
-//	// Set the owner to the creator
-//	n.setOwner(ctx, targetPath)
-//
-//	st := syscall.Stat_t{}
-//	if err := syscall.Lstat(targetPath, &st); err != nil {
-//		syscall.Unlink(targetPath)
-//		return nil, fs.ToErrno(err)
-//	}
-//
-//    oErr, oNode, _ := HandleNodeInstantiation(ctx, n, targetPath, name, &st, out, nil, nil)
-//
-//    return oNode, oErr
-//}
-//
-//// Handles reading a symlink
-//func (n *OptiFSNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
-//    log.Println("Entered READLINK")
-//	linkPath := n.RPath()
-//
-//    log.Printf("link path: %v\n", linkPath)
-//
-//	// Keep trying to read the link, doubling our buffler size each time
-//	// 256 is just an arbitrary number that isn't necessarily too large,
-//	// or too small.
-//	for l := 256; ; l *= 2 {
-//		// Create a buffer to read the link into
-//		buffer := make([]byte, l)
-//		sz, err := syscall.Readlink(linkPath, buffer)
-//		if err != nil {
-//            log.Printf("Readlink failed! - %v\n", err)
-//			return nil, fs.ToErrno(err)
-//		}
-//        log.Printf("Read succesfully, sz: {%v}\n", sz)
-//
-//		// If we fit the data into the buffer, return it
-//		if sz < len(buffer) {
-//            log.Printf("Returning, buffer {%x}\n", buffer[:sz])
-//			return buffer[:sz], fs.OK
-//		}
-//	}
-//}
+func (n *OptiFSNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
+
+	// Check write and execute permissions on the target directory
+	err1, dirMetadata := metadata.LookupDirMetadata(target)
+	if err1 == fs.OK {
+		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+		if !hasWrite {
+			return nil, fs.ToErrno(syscall.EACCES)
+		}
+		hasExec := permissions.CheckPermissions(ctx, dirMetadata, 2)
+		if !hasExec {
+			return nil, fs.ToErrno(syscall.EACCES)
+		}
+	}
+
+	// Construct the paths
+	sourcePath := filepath.Join(n.RootNode.Path, target)
+	targetPath := filepath.Join(n.RPath(), name)
+
+	// Perform the hardlink in the underlying file system
+	if err := syscall.Symlink(sourcePath, targetPath); err != nil {
+		return nil, fs.ToErrno(err)
+	}
+
+	// Set the owner to the creator
+	n.setOwner(ctx, targetPath)
+
+	st := syscall.Stat_t{}
+	if err := syscall.Lstat(targetPath, &st); err != nil {
+		syscall.Unlink(targetPath)
+		return nil, fs.ToErrno(err)
+	}
+
+    oErr, oNode, _ := HandleNodeInstantiation(ctx, n, targetPath, name, &st, out, nil, nil)
+
+    return oNode, oErr
+}
+
+// Handles reading a symlink
+func (n *OptiFSNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+    log.Println("Entered READLINK")
+	linkPath := n.RPath()
+
+    log.Printf("link path: %v\n", linkPath)
+
+	// Keep trying to read the link, doubling our buffler size each time
+	// 256 is just an arbitrary number that isn't necessarily too large,
+	// or too small.
+	for l := 256; ; l *= 2 {
+		// Create a buffer to read the link into
+		buffer := make([]byte, l)
+		sz, err := syscall.Readlink(linkPath, buffer)
+		if err != nil {
+            log.Printf("Readlink failed! - %v\n", err)
+			return nil, fs.ToErrno(err)
+		}
+        log.Printf("Read succesfully, sz: {%v}\n", sz)
+
+		// If we fit the data into the buffer, return it
+		if sz < len(buffer) {
+            log.Printf("Returning, buffer {%x}\n", buffer[:sz])
+			return buffer[:sz], fs.OK
+		}
+	}
+}
