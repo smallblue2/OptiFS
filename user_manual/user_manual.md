@@ -19,7 +19,6 @@
 - [3. Sysadmin Operations](#3-sysadmin-operations)
   - [3.1 Root Access](#31-root-access)
   - [3.2 Persistent Storage Save Location](#32-persistent-storage-save-location)
-  - [3.3 Assignment of Permissions](#33-assignment-of-permissions)
 - [4. Mounting Over NFSv4](#4-mounting-over-nfsv4)
 - [5. General Operations](#5-general-operations)
 - [6. Shutting Down OptiFS](#6-shutting-down-optifs)
@@ -131,10 +130,26 @@ This flag allows you to choose where exactly you want persistent data to be stor
 ## 3. Sysadmin Operations
 
 ### 3.1 Root Access
+A sysadmin is the only person who can perform operations in the root directory of the filesystem. As a result of this, the default owner for all files and directories created in root will be the sysadmin. This means that it is the sysadmin’s responsibility to set up all user directories and assign the correct permissions to them.
+
+An example of how this might be done can be seen below:
+
+1. Sysadmin mounts OptiFS with `filesystem mount underlying`.
+2. Sysadmin then types `cd mount`
+3. Sysadmin will make some directories, for example `mkdir comsci3home`
+4. Sysadmin will then assign permissions to each directory created individually, for example `chown :comsci3 comsci3home`
+5. Now everyone in the cohort comsci3 can access comsci3home.
+
 
 ### 3.2 Persistent Storage Save Location
+It is also the role of a sysadmin to set where the persistent store is being saved to. Although we do have a default directory set to save into, the only people who can access this directory are users with root privilege, no matter what. It is up to a sysadmin to change who is allowed to access this information, especially when changing sysadmin UID or GIDs.
 
-### 3.3 Assignment of Permissions
+An example of how this might be done can be seen below:
+
+1. Sysadmin mounts OptiFS with `filesystem -save=../storage_save mount underlying`
+2. Sysadmin then updates permissions to storage_save directory, for example `chown :sysadmins storage_save`
+3. Now all sysadmins can access this persistent storage.
+
 
 ## 4. Mounting Over NFSv4
 Firstly, download NFS for your desired distribution and purpose:
