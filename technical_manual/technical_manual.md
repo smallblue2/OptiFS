@@ -265,17 +265,112 @@ Path/filepath gets paths in regards to the operating system being used; for exam
 Flag allows the user to define certain flags their program can be run with, and the behaviour these flags allow. It is used in OptiFS to set flags to define the operation of the system, for example running without persistence, and to change sysadmin users.
 
 ## 3. High Level Design
+At its core, our project is a virtual filesystem that specialises in deduplication of duplicate content.
 
-### 3.1 State Diagram
-![A state diagram describing the creation process of a file](Create_State_Diagram.png)
-*Figure 2: State diagram describing the creation process of a regular file.*
+### 3.1 Loopback Filesystem
+In order to pull this off, we created a loopback virtual filesystem. This is a virtual filesystem that sits ontop of another filesystem. In our case, we have a FUSE virtual filesystem sitting ontop and controlling an EXT4 filesystem below.
 
-![A state diagram describing the write process of a file including deduplication logic](Write_State_Diagram.png)
-*Figure 3: State diagram describing the write (including deduplication) process of a regular file.*
+![A diagram that shows the relationship that a loopback virtual filesystem has over the underlying filesystem.](LoopbackShowcase.png)
+*Figure 2: A visual as to how Loopback filesystems interact with their underlying filesystems*
 
-### 3.3 Use Cases
+OptiFS essentially controls and defines custom behaviours for how we interact with the underlying filesystem. In our scenario, we define custom behaviours for preventing duplicate content from being stored.
+
+This provides us the benefits of being able to store data on disk through the mechanisms of the underlying filesystem and provides us all the data integrity and benefits of EXT4, with us just defining custom behaviours through our virtual filesystem (OptiFS).
+
+### 3.2 Custom Metadata System
+
+#### 3.2.1 Regular Files
+The approach that we undertook to de-duplicating data, is that we maintain a large hashmap of 64-byte hashes, obtained from hashing the contents of files.
+
+This is because when we detect a duplicate file, we create a hardlink in the underlying filesystem, and through our custom metadata, still pretend the file is unique through our virtual filesystem.
+
+![A data schema that represents the various structs used to implement our custom metadata system](DataSchema.png)
+<br>
+*Figure x: A data schema diagram that represents the various structs used to implement our custom metadata and persistence systems.*
+
+This information is stored in a hashmap defined as;
+```go
+var regularFileMetadataHash = make(map[[64]byte]*MapEntry)
+```
+
+Each `MapEntry` struct represents content hashed into a 64-byte array. This could be Hello World written in python, or a markdown file containing repository documentation, or anything. 
+
+MapEntry structs contain how many duplicate instances of that file's content exist on the OptiFS filesystem through `ReferenceCount` and actually contains each instance's custom metadata in an `EntryList` map, which is defined as `map[uint64]*MapEntryMetadata`.
+
+#### 3.2.2 Directories
+Directories uses the `MapEntryMetadata` struct as well, but as we're not deduplicating directories, we simply store their metadata in a hash indexed by their path.
+
+This is a hashmap defined as;
+```go
+var dirMetadataHash = make(map[string]*MapEntryMetadata)
+```
+
+Where we can simply create, update and retrieve directory metadata through its path in our filesystem, not as complex as searching by content hashes and reference numbers as is the case with Regular Files.
+
+#### 3.2.3 Persistence
+Additionally persistence is very important in our filesystem for many reasons, but mainly for data consistency and integrity between OptiFS program instances.
+
+We store every node in a persistence hash map, including regular files, special files and directories.
+
+This is a hash map defined as;
+```go
+var nodePersistenceHash = make(map[string]*NodeInfo)
+```
+
+This contains important information like what nodes we have custom metadata for, whether the nodes are directories or not, what their content hash and reference numbers are to retrieve their custom metadata and more. Essentially, everything we require to maintain the state of our filesystem between program instances.
+
+We take snapshots of our metadata system regularly, and on program termination too.
+
+#### 3.2.4 Encoding/Decoding of Hash Maps
+In order to store our filesystem state between program instances, we regularly encode all three of the above hash maps whilst OptiFS is running, and store them as binary files on disk.
+
+When OptiFS starts, it searches default or user-defined directories for these encoded files, and if it finds them, decodes them and fills its memory with them - retrieving any previous state defined in previous program instances of the filesystem.
+
+#### 3.2.5 Use of Hash Maps
+You'll notice these are all hashmaps, as theoretically they could all get quite large, but as long as we maintain unique keys (which we do), we can utilise the efficieny of hashmaps to (theoretically) negate lookup speeds slowing down as the filesystem grows.
+
+### 3.3 Deduplication of Regular File Content
+We utilise the benefits of a loopback filesystem to perform our deduplication logic.
+
+We hash the contents of file to determine their uniqueness, and create hardlinks on the underlying filesystem if duplicate content is found.
+
+We decided to do it this way as it completely circumvents the requirement for garbage collection as once all links to a memory location are unlinked, that memory simply disappears, no cleanup required.
+
+But it introduces one large challenge - maintaining userspace and unique attributes over duplicate files.
+
+To circumvent this, OptiFS manages its own metadata and permission system, so even when nodes in the underlying filesystem are hardlinks, we can maintain unique attributes over them.
+
 ![A use case diagram describing the writing process of a file including deduplication logic](Write_Use_Case_Diagram.png)
-*Figure 4: Use case diagram describing a user writing to a file.*
+*Figure 3: Use case diagram describing a user writing to a file.*
+
+Looking at the usecase diagram, it looks quite simple, but when you get into the implementation of such a system it very quickly gets very complicated.
+
+There are multiple different mechanisms and scenarios that need to be taken into account:
+ - Is the file new?
+ - Does the file have old metadata that needs to be brought across to a new metadata entry?
+ - Was the file previously a hardlink?
+ - How do we simulate the metadata of a new file if we're creating a hardlink?
+ - How can we efficiently hash the contents of a large file?
+ - Where do we perform deduplication - as many writes can occur before a file is released.
+ - What happens if one of the many operations required to pull this off fail?
+ - How can we support this concurrently?
+
+ We take all of these and even more into account to make a clever system that performs deduplication reliably and efficiently.
+
+First, when regular files are created, their metadata and persistence gets initialised in our system;
+![A state diagram describing the creation process of a file](Create_State_Diagram.png)
+*Figure 3: State diagram describing the creation process of a regular file.*
+
+Then when writes are performed, a highly complex process occurs to pull it off. Believe it or not, but the below diagram is yet still at a high level.
+![A state diagram describing the write process of a file including deduplication logic](Write_State_Diagram.png)
+*Figure 4: State diagram describing the write (including deduplication) process of a regular file.*
+
+### 3.4 Filesystem Integrity
+To maintain filesystem integrity, we encode important data and save it to disk regularly incase of critical failures (power loss, SIGKILL, etc).
+
+This is ran in a seperate thread to try and mitigate filesystem slowdowns, however locks do need to be obtained for each save. For this reason, the user can set this time interval themselves if the pre-defined 30 second interval doesn't suit there needs.
+
+Additionally, on startup, we perform a filesystem integrity health check, where we iterate through our entire persistent data store hash map, and ensure all underlying nodes exist - and if they don't we clean up our data stores to prevent inconsistencies in our filesystem.
 
 ## 4. Problems & Resolutions
 Writing this software proved to be the most challenging project either of us have ever worked on, and as a result we had many potentially project-ruining problems that we thankfully managed to get past. Below are a list of some large ones, but is certainly not even close to an exhaustive list of large issues that substantially delayed development, but were overcome.
