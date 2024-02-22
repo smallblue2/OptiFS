@@ -185,7 +185,8 @@ Flag allows the user to define certain flags their program can be run with, and 
 
 ## 3. High Level Design
 
-### 3.1 Data Flow
+### 3.1 State Diagrams
+![A state diagram describing the creation process of a regular file](Create_State_Diagram.png)
 
 ### 3.2 Components ????
 
