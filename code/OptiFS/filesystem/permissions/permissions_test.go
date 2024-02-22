@@ -4,6 +4,7 @@ import (
 	"context"
 	"filesystem/metadata"
 	"os/user"
+	"strconv"
 	"syscall"
 	"testing"
 
@@ -518,12 +519,6 @@ func TestCheckMask(t *testing.T) {
 	}
 }
 
-
-// TestSetSysadmin
-//TestIsUserSysadmin
-// TestValidUID + GID
-// TestChangeSysadminUID + GID
-
 func getValidUID() string {
     user, err := user.Current()
     if err != nil {
@@ -538,4 +533,158 @@ func getValidGID() string {
         return ""
     }
     return user.Gid
+}
+
+func TestValidUID(t *testing.T) {
+	testCases := []struct {
+		name     string
+		uid      string
+		expected bool
+	}{
+		{
+			name:     "Valid UID check",
+			uid:      getValidUID(),
+			expected: true,
+		},
+		{
+			name:     "Invalid UID check",
+			uid:      "09248",
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ValidUID(tc.uid)
+			if result != tc.expected {
+				t.Errorf("Expected %v, got %v", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestValidGID(t *testing.T) {
+	testCases := []struct {
+		name     string
+		gid      string
+		expected bool
+	}{
+		{
+			name:     "Valid UID check",
+			gid:      getValidGID(),
+			expected: true,
+		},
+		{
+			name:     "Invalid UID check",
+			gid:      "09248",
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ValidGID(tc.gid)
+			if result != tc.expected {
+				t.Errorf("Expected %v, got %v", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestChangeSysadminUID(t *testing.T) {
+	testCases := []struct {
+		name            string
+		uid             string
+		currentSysadmin Sysadmin
+		expectedError   syscall.Errno
+	}{
+		{
+			name: "Change sysadmin - valid",
+			uid:  getValidUID(),
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedError: fs.OK,
+		},
+		{
+			name: "Change sysadmin - invalid",
+			uid:  "9248",
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedError: fs.ToErrno(syscall.ENOENT),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
+			err := ChangeSysadminUID(tc.uid)
+			if err != tc.expectedError {
+				t.Errorf("Expected %v. got %v\n", tc.expectedError, err)
+			}
+			if tc.expectedError == fs.OK {
+                expected, err := strconv.Atoi(tc.uid)
+                if err != nil {
+                    t.Fatal("Failed to convert UID string to int")
+                }
+				if SysAdmin.UID != uint32(expected) {
+					t.Errorf("Expected %v, got %v\n", expected, SysAdmin.UID)
+				}
+			}
+		})
+	}
+}
+
+func TestChangeSysadminGID(t *testing.T) {
+	testCases := []struct {
+		name            string
+		gid             string
+		currentSysadmin Sysadmin
+		expectedError   syscall.Errno
+	}{
+		{
+			name: "Change sysadmin - valid",
+			gid:  getValidGID(),
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedError: fs.OK,
+		},
+		{
+			name: "Change sysadmin - invalid",
+			gid:  "9248",
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expectedError: fs.ToErrno(syscall.ENOENT),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
+			err := ChangeSysadminGID(tc.gid)
+			if err != tc.expectedError {
+				t.Errorf("Expected %v. got %v\n", tc.expectedError, err)
+			}
+			if tc.expectedError == fs.OK {
+                expected, err := strconv.Atoi(getValidGID())
+                if err != nil {
+                    t.Fatal("Failed to convert GID string to int")
+                }
+				if SysAdmin.GID != uint32(expected) {
+					t.Errorf("Expected %v, got %v\n", expected, SysAdmin.GID)
+				}
+			}
+		})
+	}
 }

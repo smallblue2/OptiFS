@@ -6,6 +6,9 @@ import (
 	"os"
 	"os/user"
 	"strconv"
+	"syscall"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 )
 
 type Sysadmin struct {
@@ -73,22 +76,25 @@ func PrintSysadminInfo() {
 
 // get the UID and GID of the sysadmin that runs the filesystem
 // this is saved (persisent), so we only need to get it once
-func SetSysadmin() error {
+func SetSysadmin() syscall.Errno {
 	log.Println("No Sysadmin found, setting user as sysadmin.")
 
 	sysadmin, sErr := user.Current() // get the current user
 	if sErr != nil {
-		log.Fatalf("Couldn't get sysadmin info!: %v\n", sErr)
+		log.Printf("Couldn't get sysadmin info!: %v\n", sErr)
+		return fs.ToErrno(sErr)
 	}
 
 	u, uidConversionErr := strconv.Atoi(sysadmin.Uid) // get the UID
 	if uidConversionErr != nil {
-		log.Fatalf("Couldn't get sysadmin UID!: %v\n", uidConversionErr)
+		log.Printf("Couldn't get sysadmin UID!: %v\n", uidConversionErr)
+		return fs.ToErrno(uidConversionErr)
 	}
 
 	g, gidConversionErr := strconv.Atoi(sysadmin.Gid) // get the GID
 	if gidConversionErr != nil {
-		log.Fatalf("Couldn't get sysadmin GID!: %v\n", gidConversionErr)
+		log.Printf("Couldn't get sysadmin GID!: %v\n", gidConversionErr)
+		return fs.ToErrno(gidConversionErr)
 	}
 
 	// fill in sysadmin details
@@ -96,7 +102,7 @@ func SetSysadmin() error {
 	SysAdmin.GID = uint32(g)
 	SysAdmin.Set = true
 
-	return nil
+	return fs.OK
 
 }
 
@@ -144,38 +150,42 @@ func ValidGID(gid string) bool {
 
 // change the sysadmin UID (if specified)
 // it is checked before this function is called that the person calling it is a current sysadmin
-func ChangeSysadminUID(uid string) error {
+func ChangeSysadminUID(uid string) syscall.Errno {
 	if !ValidUID(uid) {
-		log.Fatalf("UID is NOT valid: %v\n", uid)
+		log.Printf("UID is NOT valid: %v\n", uid)
+		return fs.ToErrno(syscall.ENOENT)
 	}
 
 	// extract userID
 	newUid, conversionErr := strconv.Atoi(uid)
 	if conversionErr != nil {
-		log.Fatalf("Couldn't get new UID!: %v\n", conversionErr)
+		log.Printf("Couldn't get new UID!: %v\n", conversionErr)
+		return fs.ToErrno(syscall.ENOENT)
 	}
 	SysAdmin.UID = uint32(newUid) // set new UID
 	PrintSysadminInfo()
 
-	return nil
+	return fs.OK
 
 }
 
 // change the group of the sysadmin (if specified)
 // it is checked before this function is called that the person calling it is a current sysadmin
-func ChangeSysadminGID(gid string) error {
+func ChangeSysadminGID(gid string) syscall.Errno {
 	if !ValidUID(gid) {
-		log.Fatalf("UID is NOT valid: %v\n", gid)
+		log.Printf("GID is NOT valid: %v\n", gid)
+		return fs.ToErrno(syscall.ENOENT)
 	}
 
-	// extract userID
+	// extract GID
 	newGid, conversionErr := strconv.Atoi(gid)
 	if conversionErr != nil {
-		log.Fatalf("Couldn't get new GID!: %v\n", conversionErr)
+		log.Printf("Couldn't get new GID!: %v\n", conversionErr)
+		return fs.ToErrno(syscall.ENOENT)
 	}
 	SysAdmin.GID = uint32(newGid) // set new GID
 	PrintSysadminInfo()
 
-	return nil
+	return fs.OK
 
 }
