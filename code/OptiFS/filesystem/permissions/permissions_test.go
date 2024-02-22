@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"filesystem/metadata"
+	"os/user"
 	"syscall"
 	"testing"
 
@@ -515,4 +516,26 @@ func TestCheckMask(t *testing.T) {
 			}
 		})
 	}
+}
+
+
+// TestSetSysadmin
+//TestIsUserSysadmin
+// TestValidUID + GID
+// TestChangeSysadminUID + GID
+
+func getValidUID() string {
+    user, err := user.Current()
+    if err != nil {
+        return ""
+    }
+    return user.Uid
+}
+
+func getValidGID() string {
+    user, err := user.Current()
+    if err != nil {
+        return ""
+    }
+    return user.Gid
 }
