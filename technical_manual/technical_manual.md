@@ -1,5 +1,90 @@
 # OptiFS Technical Specification
 
+## Table of Contents
+- [1. Introduction](#1-introduction)
+  - [1.1 Overview](#11-overview)
+  - [1.2 Glossary](#12-glossary)
+- [2. System Architecture](#2-system-architecture)
+  - [2.1 First-Party Packages](#21-first-party-packages)
+    - [2.1.1 Filesystem](#211-filesystem)
+      - [2.1.1.1 Description](#2111-description)
+      - [2.1.1.2 Responsibilities](#2112-responsibilities)
+    - [2.1.2 Hashing](#212-hashing)
+      - [2.1.2.1 Description](#2121-description)
+      - [2.1.2.2 Responsibilities](#2122-responsibilities)
+    - [2.1.3 VFS](#213-vfs)
+      - [2.1.3.1 Description](#2131-description)
+      - [2.1.3.2 Responsibilities](#2132-responsibilities)
+    - [2.1.4 Permissions](#214-permissions)
+      - [2.1.4.1 Description](#2141-description)
+      - [2.1.4.2 Responsibilities](#2142-responsibilities)
+    - [2.1.5 Metadata](#215-metadata)
+      - [2.1.5.1 Description](#2151-description)
+      - [2.1.5.2 Responsibilities](#2152-responsibilities)
+  - [2.2 Third-Party Packages](#22-third-party-packages)
+    - [2.2.1 hanwen/go-fuse](#221-hanwengo-fuse)
+    - [2.2.2 x/sys/unix](#222-xsysunix)
+    - [2.2.3 lukechampine.com/blake3](#223-lukechampinecomblake3)
+  - [2.3 Go Standard Library](#23-go-standard-library)
+    - [2.3.1 syscall](#231-syscall)
+    - [2.3.2 log](#232-log)
+    - [2.3.3 sort](#233-sort)
+    - [2.3.4 bytes](#234-bytes)
+    - [2.3.5 testing](#235-testing)
+    - [2.3.6 reflect](#236-reflect)
+    - [2.3.7 encoding/gob](#237-encodinggob)
+    - [2.3.8 os](#238-os)
+    - [2.3.8.1 os/user](#2381-osuser)
+    - [2.3.9 sync](#239-sync)
+    - [2.3.10 context](#2310-context)
+    - [2.3.12 strconv](#2312-strconv)
+    - [2.3.13 fmt](#2313-fmt)
+    - [2.3.14 time](#2314-time)
+    - [2.3.15 unsafe](#2315-unsafe)
+    - [2.3.16 encoding/binary](#2316-encodingbinary)
+    - [2.3.17 path/filepath](#2317-pathfilepath)
+    - [2.3.18 flag](#2318-flag)
+- [3. High Level Design](#3-high-level-design)
+  - [3.1 Data Flow](#31-data-flow)
+  - [3.2 Components ????](#32-components-)
+  - [3.3 Use Cases and Sequences](#33-use-cases-and-sequences)
+- [4. Problems & Resolutions](#4-problems--resolutions)
+  - [4.1 Basic FUSE Implementation](#41-basic-fuse-implementation)
+    - [4.1.1 Problem](#411-problem)
+    - [4.1.2 Resolution](#412-resolution)
+  - [4.2 NFS and FUSE Compatibility](#42-nfs-and-fuse-compatibility)
+    - [4.2.1 Problem](#421-problem)
+    - [4.2.2 Resolution](#422-resolution)
+  - [4.3 Mounting NFS On Our FUSE Filesystem](#43-mounting-nfs-on-our-fuse-filesystem)
+    - [4.3.1 Problem](#431-problem)
+    - [4.3.2 Resolution](#432-resolution)
+  - [4.4 Content Deduplication](#44-content-deduplication)
+    - [4.4.1 Problem](#441-problem)
+    - [4.4.2 Resolution](#442-resolution)
+  - [4.5 Flawed Node Instantiation](#45-flawed-node-instantiation)
+    - [4.5.1 Problem](#451-problem)
+    - [4.5.2 Resolution](#452-resolution)
+  - [4.6 Lack of Directory Permissions](#46-lack-of-directory-permissions)
+    - [4.6.1 Problem](#461-problem)
+    - [4.6.2 Resolution](#462-resolution)
+  - [4.7 Broken Content Deduplication For Large Files](#47-broken-content-deduplication-for-large-files)
+    - [4.7.1 Problem](#471-problem)
+    - [4.7.2 Resolution](#472-resolution)
+  - [4.8 Incorrect NFS Synchronisation](#48-incorrect-nfs-synchronisation)
+    - [4.8.1 Problem](#481-problem)
+    - [4.8.2 Resolution](#482-resolution)
+  - [4.9 Implementing Persistence](#49-implementing-persistence)
+    - [4.9.1 Problem](#491-problem)
+    - [4.9.2 Resolution](#492-resolution)
+- [5. Installation Guide](#5-installation-guide)
+  - [5.1 Fuse3](#51-fuse3)
+  - [5.2 Go](#52-go)
+  - [5.3 OptiFS](#53-optifs)
+  - [5.4 NFSv4 (Optional)](#54-nfsv4-optional)
+    - [5.4.1 Installation of NFSv4](#541-installation-of-nfsv4)
+    - [5.4.2 Exporting OptiFS over NFSv4](#542-exporting-optifs-over-nfsv4)
+
+
 ## 1. Introduction
 
 ### 1.1 Overview
@@ -8,21 +93,18 @@ OptiFS is an intermediary virtual filesystem to be used over NFS with large grou
 The system is mounted over NFS, where users can connect to the same server and, in real time, synchronously view, edit, create, delete, move and rename files and directories seamlessly. Although the system is designed to run seamlessly with NFS, it can also run as a standalone filesystem.
 
 ### 1.2 Glossary
-**NFS** - protocol for defining a network file system, stores files over a network.
 
-**Loopback filesystem** - mounting a virtual filesystem on top of an existing filesystem.
-
-**FUSE** - a filesystem in userspace which allows users to create their own filesystem, without writing in the kernel.
-
-**VFS** - the Linux virtual file system, which provides a filesystem interface to programs like FUSE, a layer in the kernel.
-
-**BLAKE3** - an extremely fast and secure cryptographic hash function. 
-
-**Sysadmin** - the general maintainer of OptiFS (system administrator)
-
-**UID** - user ID of a user.
-
-**GID** - group ID that the user is in.
+| Term | Definition  |
+|---|---|
+| **NFS** | **Network File System** - a protocol that allows a user on a client computer to access files over a network (remote file sharing) |
+| **Loopback Filesystem** | Mounting a virtual filesystem on top of an existing filesystem |
+| **FUSE** | A **filesystem in userspace** which allows users to create their own filesystem, without writing in the kernel. |
+| **VFS** | The Linux **virtual file system**, which provides a filesystem interface to programs like FUSE, a layer in the kernel. |
+| **BLAKE3** | An extremely fast and secure cryptographic hash function. |
+| **Sysadmin** | The general maintainer of OptiFS **(system administrator)** |
+| **UID** | User ID of a user. |
+| **GID** | Group ID that the user is in. |
+| **BSD 3 Clause** | A permissive open-source software license. |
 
 ## 2. System Architecture
 
@@ -185,8 +267,7 @@ Flag allows the user to define certain flags their program can be run with, and 
 
 ## 3. High Level Design
 
-### 3.1 State Diagrams
-![A state diagram describing the creation process of a regular file](Create_State_Diagram.png)
+### 3.1 Data Flow
 
 ### 3.2 Components ????
 
