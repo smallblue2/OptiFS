@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 )
@@ -385,3 +386,11 @@ func InsureIntegrity() {
 	log.Println("FILESYSTEM HEALTHY")
 }
 
+// allows us to constantly save each hashmap for data integrity
+// saves every 30s by default
+func SaveStorageRegularly(dest string, interval int) {
+	for range time.Tick(time.Second * time.Duration(interval)) {
+		SavePersistantStorage(dest)
+		log.Println("Saving Persistent Stores!")
+	}
+}

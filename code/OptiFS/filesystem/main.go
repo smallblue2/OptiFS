@@ -24,6 +24,7 @@ func main() {
 	disableIntegrityCheck := flag.Bool("disable-icheck", false, "disables the integrity check of the persistent data of the filesystem")
 	changeSysadminUID := flag.String("change-sysadmin-uid", "", "changes the sysadmin (through UID) of the system")
 	changeSysadminGID := flag.String("change-sysadmin-gid", "", "changes the sysadmin group of the system")
+	interval := flag.Int("interval", 30, "defines an amount of time that the system will regularly save persistent stores")
 
 	flag.Parse() // parse arguments
 	if flag.NArg() < 2 {
@@ -44,11 +45,11 @@ func main() {
 
 	// set the options for the filesystem:
 	options := &fs.Options{}
-	options.Debug = *debug                                                               // set the debug value the user chooses (T/F)
-	options.AllowOther = true                                                            // Gives users access other than the one that originally mounts it
-    sec := time.Duration(0)      // Attempting to prevent caching
-    options.EntryTimeout = &sec
-    options.AttrTimeout = &sec
+	options.Debug = *debug    // set the debug value the user chooses (T/F)
+	options.AllowOther = true // Gives users access other than the one that originally mounts it
+	sec := time.Duration(0)   // Attempting to prevent caching
+	options.EntryTimeout = &sec
+	options.AttrTimeout = &sec
 	options.MountOptions.Options = append(options.MountOptions.Options, "fsname="+under) // set the filesystem name
 	options.NullPermissions = true                                                       // doesn't check the permissions for calls (good for setting up custom permissions [namespaces??])
 
@@ -78,14 +79,18 @@ func main() {
 
 	// The user wishes to change the sysadmin UID/GID
 	if *changeSysadminUID != "" {
-		permissions.ChangeSysadminUID(*changeSysadminUID)
-		permissions.SaveSysadmin(dest) // save the changes
-		return
+		if permissions.IsUserSysadmin() {
+			permissions.ChangeSysadminUID(*changeSysadminUID)
+			permissions.SaveSysadmin(dest) // save the changes
+			return
+		}
 	}
 	if *changeSysadminGID != "" {
-		permissions.ChangeSysadminGID(*changeSysadminGID)
-		permissions.SaveSysadmin(dest) // save the changes
-		return
+		if permissions.IsUserSysadmin() {
+			permissions.ChangeSysadminGID(*changeSysadminGID)
+			permissions.SaveSysadmin(dest) // save the changes
+			return
+		}
 	}
 
 	// mount the filesystem
@@ -117,6 +122,8 @@ func main() {
 	// when we are shutting down the filesystem, save the hashmaps
 
 	if !(*removePersistence) {
+		go metadata.SaveStorageRegularly(dest, *interval)
+
 		defer func() {
 			metadata.SavePersistantStorage(dest)
 			permissions.SaveSysadmin(dest)
