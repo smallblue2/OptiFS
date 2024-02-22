@@ -45,9 +45,8 @@
     - [2.3.17 path/filepath](#2317-pathfilepath)
     - [2.3.18 flag](#2318-flag)
 - [3. High Level Design](#3-high-level-design)
-  - [3.1 Data Flow](#31-data-flow)
-  - [3.2 Components ????](#32-components-)
-  - [3.3 Use Cases and Sequences](#33-use-cases-and-sequences)
+  - [3.1 State Diagrams](#31-state-diagrams)
+  - [3.2 Use Cases](#32-use-cases)
 - [4. Problems & Resolutions](#4-problems--resolutions)
   - [4.1 Basic FUSE Implementation](#41-basic-fuse-implementation)
     - [4.1.1 Problem](#411-problem)
@@ -267,13 +266,16 @@ Flag allows the user to define certain flags their program can be run with, and 
 
 ## 3. High Level Design
 
-### 3.1 Data Flow
+### 3.1 State Diagram
+![A state diagram describing the creation process of a file](Create_State_Diagram.png)
+*Figure 2: State diagram describing the creation process of a regular file.*
 
-### 3.2 Components ????
+![A state diagram describing the write process of a file including deduplication logic](Write_State_Diagram.png)
+*Figure 3: State diagram describing the write (including deduplication) process of a regular file.*
 
-### 3.3 Use Cases and Sequences
+### 3.3 Use Cases
 ![A use case diagram describing the writing process of a file including deduplication logic](Write_Use_Case_Diagram.png)
-*Figure 2: Use case diagram describing a user writing to a file.*
+*Figure 4: Use case diagram describing a user writing to a file.*
 
 ## 4. Problems & Resolutions
 Writing this software proved to be the most challenging project either of us have ever worked on, and as a result we had many potentially project-ruining problems that we thankfully managed to get past. Below are a list of some large ones, but is certainly not even close to an exhaustive list of large issues that substantially delayed development, but were overcome.
