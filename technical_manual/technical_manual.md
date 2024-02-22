@@ -45,8 +45,15 @@
     - [2.3.17 path/filepath](#2317-pathfilepath)
     - [2.3.18 flag](#2318-flag)
 - [3. High Level Design](#3-high-level-design)
-  - [3.1 State Diagrams](#31-state-diagrams)
-  - [3.2 Use Cases](#32-use-cases)
+  - [3.1 Loopback Filesystem](#31-loopback-filesystem)
+  - [3.2 Custom Metadata System](#32-custom-metadata-system)
+    - [3.2.1 Regular Files](#321-regular-files)
+    - [3.2.2 Directories](#322-directories)
+    - [3.2.3 Persistence](#323-persistence)
+    - [3.2.4 Encoding/Decoding of Hash Maps](#324-encodingdecoding-of-hash-maps)
+    - [3.2.5 Use of Hash Maps](#325-use-of-hash-maps)
+  - [3.3 Deduplication of Regular File Content](#33-deduplication-of-regular-file-content)
+  - [3.4 Filesystem Integrity](#34-filesystem-integrity)
 - [4. Problems & Resolutions](#4-problems--resolutions)
   - [4.1 Basic FUSE Implementation](#41-basic-fuse-implementation)
     - [4.1.1 Problem](#411-problem)
@@ -82,7 +89,6 @@
   - [5.4 NFSv4 (Optional)](#54-nfsv4-optional)
     - [5.4.1 Installation of NFSv4](#541-installation-of-nfsv4)
     - [5.4.2 Exporting OptiFS over NFSv4](#542-exporting-optifs-over-nfsv4)
-
 
 ## 1. Introduction
 
@@ -286,7 +292,7 @@ This is because when we detect a duplicate file, we create a hardlink in the und
 
 ![A data schema that represents the various structs used to implement our custom metadata system](DataSchema.png)
 <br>
-*Figure x: A data schema diagram that represents the various structs used to implement our custom metadata and persistence systems.*
+*Figure 3: A data schema diagram that represents the various structs used to implement our custom metadata and persistence systems.*
 
 This information is stored in a hashmap defined as;
 ```go
@@ -341,7 +347,7 @@ But it introduces one large challenge - maintaining userspace and unique attribu
 To circumvent this, OptiFS manages its own metadata and permission system, so even when nodes in the underlying filesystem are hardlinks, we can maintain unique attributes over them.
 
 ![A use case diagram describing the writing process of a file including deduplication logic](Write_Use_Case_Diagram.png)
-*Figure 3: Use case diagram describing a user writing to a file.*
+*Figure 4: Use case diagram describing a user writing to a file.*
 
 Looking at the usecase diagram, it looks quite simple, but when you get into the implementation of such a system it very quickly gets very complicated.
 
@@ -359,11 +365,11 @@ There are multiple different mechanisms and scenarios that need to be taken into
 
 First, when regular files are created, their metadata and persistence gets initialised in our system;
 ![A state diagram describing the creation process of a file](Create_State_Diagram.png)
-*Figure 3: State diagram describing the creation process of a regular file.*
+*Figure 5: State diagram describing the creation process of a regular file.*
 
 Then when writes are performed, a highly complex process occurs to pull it off. Believe it or not, but the below diagram is yet still at a high level.
 ![A state diagram describing the write process of a file including deduplication logic](Write_State_Diagram.png)
-*Figure 4: State diagram describing the write (including deduplication) process of a regular file.*
+*Figure 6: State diagram describing the write (including deduplication) process of a regular file.*
 
 ### 3.4 Filesystem Integrity
 To maintain filesystem integrity, we encode important data and save it to disk regularly incase of critical failures (power loss, SIGKILL, etc).
