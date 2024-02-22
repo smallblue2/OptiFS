@@ -1,0 +1,28 @@
+# Our Server & Client services
+services:
+  nfs-server:
+    image: itsthenetwork/nfs-server-alpine
+    container_name: nfs-server
+    privileged: true
+    networks:
+      - nfs-network
+    volumes: 
+      - ./nfs-volume:/nfsshare
+    environment:
+      - SHARED_DIRECTORY=/nfsshare
+
+  nfs-client:
+    image: alpine
+    container_name: nfs-client
+    depends_on:
+      - nfs-server
+    networks:
+      - nfs-network
+    command: sh -c "apk add --no-cache nfs-utils && mkdir -p /mnt/nfs && mount nfs-server:/ /mnt/nfs && /bin/sh"
+    privileged: true
+    stdin_open: true
+    tty: true
+
+networks:
+  nfs-network:
+    driver: bridge
