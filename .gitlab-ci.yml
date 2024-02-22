@@ -1,11 +1,18 @@
-
 stages:
   - test
 
-test_optiFS: 
+test_metadata:
   stage: test
-  image: golang:latest 
+  image: golang:latest
   before_script:
-    - cd code/OptiFS/filesystem
+    - cd code/OptiFS/filesystem/metadata
   script:
-    - go test -v ./metadata ./permissions
+    - go test -v ./
+
+test_permissions:
+  stage: test
+  image: golang:latest
+  before_script:
+    - cd code/OptiFS/filesystem/permissions
+  script:
+    - go test -v ./
