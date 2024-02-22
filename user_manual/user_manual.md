@@ -193,6 +193,11 @@ Where mount_point is the mount point specified at runtime.
 ### 6.1 Shutting Down over NFSv4
 To shut down OptiFS over NFS, you simply perform the same steps as mounting the filesystem, but in reverse order:
 
-1. Stop the NFSv4 service (`sudo systemctl stop nfsv4-server` on Arch)
-2. Unmount OptiFS (`sudo umount mount`)
-
+1. Stop the NFSv4 service
+```sh
+sudo systemctl stop nfsv4-server
+```
+2. Unmount OptiFS 
+```sh
+sudo umount <mount_point>
+```
