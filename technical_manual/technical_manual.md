@@ -26,7 +26,8 @@ The system is mounted over NFS, where users can connect to the same server and, 
 
 ## 2. System Architecture
 
-Figure 1: Package diagram of First Party packages.
+![A package diagram of the first-party (custom) packages in our system](Package_Diagram.png)
+*Figure 1: Package diagram of First Party packages.*
 
 ### 2.1 First-Party Packages
 First-Party packages are custom packages developed by the development team solely for use within this project.
@@ -189,7 +190,8 @@ Flag allows the user to define certain flags their program can be run with, and 
 ### 3.2 Components ????
 
 ### 3.3 Use Cases and Sequences
-
+![A use case diagram describing the writing process of a file including deduplication logic](Write_Use_Case_Diagram.png)
+*Figure 2: Use case diagram describing a user writing to a file.*
 
 ## 4. Problems & Resolutions
 Writing this software proved to be the most challenging project either of us have ever worked on, and as a result we had many potentially project-ruining problems that we thankfully managed to get past. Below are a list of some large ones, but is certainly not even close to an exhaustive list of large issues that substantially delayed development, but were overcome.
