@@ -279,16 +279,18 @@ In order to pull this off, we created a loopback virtual filesystem. This is a v
 ![A diagram that shows the relationship that a loopback virtual filesystem has over the underlying filesystem.](LoopbackShowcase.png)
 *Figure 2: A visual as to how Loopback filesystems interact with their underlying filesystems*
 
-OptiFS essentially controls and defines custom behaviours for how we interact with the underlying filesystem. In our scenario, we define custom behaviours for preventing duplicate content from being stored.
+OptiFS essentially controls and defines custom behaviours for how we interact with the underlying filesystem. In our case, we define custom behaviours for preventing duplicate content from being stored.
 
-This provides us the benefits of being able to store data on disk through the mechanisms of the underlying filesystem and provides us all the data integrity and benefits of EXT4, with us just defining custom behaviours through our virtual filesystem (OptiFS).
+This provides us the benefits of being able to store data on disk through the mechanisms of the underlying filesystem alongside providing us all the data integrity and benefits of EXT4, with us just defining custom behaviours through our virtual filesystem (OptiFS).
 
 ### 3.2 Custom Metadata System
 
 #### 3.2.1 Regular Files
 The approach that we undertook to de-duplicating data, is that we maintain a large hashmap of 64-byte hashes, obtained from hashing the contents of files.
 
-This is because when we detect a duplicate file, we create a hardlink in the underlying filesystem, and through our custom metadata, still pretend the file is unique through our virtual filesystem.
+We decided to maintain a large hashmap of 64-byte hashes that are obtained from hashing the content of files as part of our method of de-duplicating data.
+
+This is because when we detect a duplicate file, we create a hardlink in the underlying filesystem. Through our custom metadata, we still pretend the file is unique through our virtual filesystem.
 
 ![A data schema that represents the various structs used to implement our custom metadata system](DataSchema.png)
 <br>
@@ -299,19 +301,19 @@ This information is stored in a hashmap defined as;
 var regularFileMetadataHash = make(map[[64]byte]*MapEntry)
 ```
 
-Each `MapEntry` struct represents content hashed into a 64-byte array. This could be Hello World written in python, or a markdown file containing repository documentation, or anything. 
+Each `MapEntry` struct represents content hashed into a 64-byte array. This could be Hello World written in python, or a markdown file containing repository documentation, or basically anything. 
 
-MapEntry structs contain how many duplicate instances of that file's content exist on the OptiFS filesystem through `ReferenceCount` and actually contains each instance's custom metadata in an `EntryList` map, which is defined as `map[uint64]*MapEntryMetadata`.
+MapEntry structs contain how many duplicate instances of that file's content exist on the OptiFS filesystem through `ReferenceCount` and respectively each instance's custom metadata in an `EntryList` map, which is defined as `map[uint64]*MapEntryMetadata`.
 
 #### 3.2.2 Directories
-Directories uses the `MapEntryMetadata` struct as well, but as we're not deduplicating directories, we simply store their metadata in a hash indexed by their path.
+Directories uses the `MapEntryMetadata` struct as well, but as we're not deduplicating directories we simply store their metadata in a hash indexed by their path.
 
 This is a hashmap defined as;
 ```go
 var dirMetadataHash = make(map[string]*MapEntryMetadata)
 ```
 
-Where we can simply create, update and retrieve directory metadata through its path in our filesystem, not as complex as searching by content hashes and reference numbers as is the case with Regular Files.
+where we can simply create, update and retrieve directory metadata through its path in our filesystem. It's not as complex as searching by content hashes and reference numbers as is the case with Regular Files.
 
 #### 3.2.3 Persistence
 Additionally persistence is very important in our filesystem for many reasons, but mainly for data consistency and integrity between OptiFS program instances.
@@ -333,7 +335,7 @@ In order to store our filesystem state between program instances, we regularly e
 When OptiFS starts, it searches default or user-defined directories for these encoded files, and if it finds them, decodes them and fills its memory with them - retrieving any previous state defined in previous program instances of the filesystem.
 
 #### 3.2.5 Use of Hash Maps
-You'll notice these are all hashmaps, as theoretically they could all get quite large, but as long as we maintain unique keys (which we do), we can utilise the efficieny of hashmaps to (theoretically) negate lookup speeds slowing down as the filesystem grows.
+We made the decision to use hashmaps to store our data. This was a conscious decision, as even if they get quite large, they are extremely efficient to perform lookups on. Utilising this fact, we can ensure to negate lookup speeds as the filesystem inevitably grows.
 
 ### 3.3 Deduplication of Regular File Content
 We utilise the benefits of a loopback filesystem to perform our deduplication logic.
@@ -342,14 +344,14 @@ We hash the contents of file to determine their uniqueness, and create hardlinks
 
 We decided to do it this way as it completely circumvents the requirement for garbage collection as once all links to a memory location are unlinked, that memory simply disappears, no cleanup required.
 
-But it introduces one large challenge - maintaining userspace and unique attributes over duplicate files.
+However, it introduces one large challenge - maintaining userspace and unique attributes over duplicate files.
 
-To circumvent this, OptiFS manages its own metadata and permission system, so even when nodes in the underlying filesystem are hardlinks, we can maintain unique attributes over them.
+To circumvent this, OptiFS manages its own metadata and permission system. Even when nodes in the underlying filesystem are hardlinks, we can maintain unique attributes over them.
 
 ![A use case diagram describing the writing process of a file including deduplication logic](Write_Use_Case_Diagram.png)
 *Figure 4: Use case diagram describing a user writing to a file.*
 
-Looking at the usecase diagram, it looks quite simple, but when you get into the implementation of such a system it very quickly gets very complicated.
+Looking at the usecase diagram, it looks quite simple, however when you get into the implementation of such a system it very quickly gets extremely complicated.
 
 There are multiple different mechanisms and scenarios that need to be taken into account:
  - Is the file new?
@@ -361,7 +363,7 @@ There are multiple different mechanisms and scenarios that need to be taken into
  - What happens if one of the many operations required to pull this off fail?
  - How can we support this concurrently?
 
- We take all of these and even more into account to make a clever system that performs deduplication reliably and efficiently.
+ We take all of these (and even more) into account to make a clever system that performs deduplication reliably and efficiently.
 
 First, when regular files are created, their metadata and persistence gets initialised in our system;
 ![A state diagram describing the creation process of a file](Create_State_Diagram.png)
@@ -374,7 +376,7 @@ Then when writes are performed, a highly complex process occurs to pull it off. 
 ### 3.4 Filesystem Integrity
 To maintain filesystem integrity, we encode important data and save it to disk regularly incase of critical failures (power loss, SIGKILL, etc).
 
-This is ran in a seperate thread to try and mitigate filesystem slowdowns, however locks do need to be obtained for each save. For this reason, the user can set this time interval themselves if the pre-defined 30 second interval doesn't suit there needs.
+This is ran in a seperate thread to try and mitigate filesystem slowdowns, however locks do need to be obtained for each save. For this reason, the user can set this time interval themselves if the pre-defined 30 second interval doesn't suit their needs.
 
 Additionally, on startup, we perform a filesystem integrity health check, where we iterate through our entire persistent data store hash map, and ensure all underlying nodes exist - and if they don't we clean up our data stores to prevent inconsistencies in our filesystem.
 

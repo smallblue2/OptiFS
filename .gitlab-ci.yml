@@ -16,3 +16,11 @@ test_permissions:
     - cd code/OptiFS/filesystem/permissions
   script:
     - go test -v ./
+
+test_hashing:
+  stage: test
+  image: golang:latest
+  before_script:
+    - cd code/OptiFS/filesystem/hashing
+  script:
+    - go test -v ./
