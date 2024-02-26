@@ -78,14 +78,15 @@ func TestIsGroup(t *testing.T) {
 
 func TestCheckMode(t *testing.T) {
 	testCases := []struct {
-		name         string
-		uid          uint32
-		gid          uint32
-		nodeMetadata *metadata.MapEntryMetadata
-		ownerFlag    uint32
-		groupFlag    uint32
-		otherFlag    uint32
-		expected     bool
+		name            string
+		uid             uint32
+		gid             uint32
+		nodeMetadata    *metadata.MapEntryMetadata
+		ownerFlag       uint32
+		groupFlag       uint32
+		otherFlag       uint32
+		currentSysadmin Sysadmin
+		expected        bool
 	}{
 		{
 			name:         "Owner can write",
@@ -95,7 +96,12 @@ func TestCheckMode(t *testing.T) {
 			ownerFlag:    0b010000000, // owner write
 			groupFlag:    0,
 			otherFlag:    0,
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Other can read",
@@ -105,7 +111,12 @@ func TestCheckMode(t *testing.T) {
 			ownerFlag:    0,
 			groupFlag:    0,
 			otherFlag:    0b000000100, // other read
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Group can exec",
@@ -115,7 +126,12 @@ func TestCheckMode(t *testing.T) {
 			ownerFlag:    0,
 			groupFlag:    0b000001000, // group exec
 			otherFlag:    0,
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Owner can't exec",
@@ -125,7 +141,12 @@ func TestCheckMode(t *testing.T) {
 			ownerFlag:    0b001000000, // owner exec
 			groupFlag:    0,
 			otherFlag:    0,
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
 		},
 		{
 			name:         "Other can't write",
@@ -135,7 +156,12 @@ func TestCheckMode(t *testing.T) {
 			ownerFlag:    0,
 			groupFlag:    0,
 			otherFlag:    0b000000010, // other read
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
 		},
 		{
 			name:         "Group can't read",
@@ -145,12 +171,33 @@ func TestCheckMode(t *testing.T) {
 			ownerFlag:    0,
 			groupFlag:    0b000000100, // group read
 			otherFlag:    0,
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
+		},
+		{
+			name:         "Sysadmin Bypass",
+			uid:          1000,
+			gid:          1000,
+			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1320, Gid: 1000, Mode: 0b111101001},
+			ownerFlag:    0,
+			groupFlag:    0b000000100, // group read
+			otherFlag:    0,
+			currentSysadmin: Sysadmin{
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
+				Set: true,
+			},
+			expected: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
 			result := checkMode(tc.uid, tc.gid, tc.nodeMetadata, tc.ownerFlag, tc.groupFlag, tc.otherFlag)
 			if result != tc.expected {
 				t.Errorf("Expected %v, got %v", tc.expected, result)
@@ -161,29 +208,53 @@ func TestCheckMode(t *testing.T) {
 
 func TestReadCheck(t *testing.T) {
 	testCases := []struct {
-		name         string
-		uid          uint32
-		gid          uint32
-		nodeMetadata *metadata.MapEntryMetadata
-		expected     bool
+		name            string
+		uid             uint32
+		gid             uint32
+		nodeMetadata    *metadata.MapEntryMetadata
+		currentSysadmin Sysadmin
+		expected        bool
 	}{
 		{
 			name:         "Owner read",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b111101101},
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Owner can't read",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b011101101},
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
+		},
+		{
+			name:         "Sysadmin Bypass",
+			uid:          1000,
+			gid:          1000,
+			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b011101101},
+			currentSysadmin: Sysadmin{
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
+				Set: true,
+			},
+			expected: true,
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
 			result := readCheck(tc.uid, tc.gid, tc.nodeMetadata)
 			if result != tc.expected {
 				t.Errorf("Expected %v, got %v", tc.expected, result)
@@ -194,29 +265,53 @@ func TestReadCheck(t *testing.T) {
 
 func TestWriteCheck(t *testing.T) {
 	testCases := []struct {
-		name         string
-		uid          uint32
-		gid          uint32
-		nodeMetadata *metadata.MapEntryMetadata
-		expected     bool
+		name            string
+		uid             uint32
+		gid             uint32
+		nodeMetadata    *metadata.MapEntryMetadata
+		currentSysadmin Sysadmin
+		expected        bool
 	}{
 		{
 			name:         "Owner write",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b111101101},
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Owner can't write",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b101101101},
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
+		},
+		{
+			name:         "Sysadmin Bypass",
+			uid:          1000,
+			gid:          1000,
+			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b101101101},
+			currentSysadmin: Sysadmin{
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
+				Set: true,
+			},
+			expected: true,
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
 			result := writeCheck(tc.uid, tc.gid, tc.nodeMetadata)
 			if result != tc.expected {
 				t.Errorf("Expected %v, got %v", tc.expected, result)
@@ -228,29 +323,53 @@ func TestWriteCheck(t *testing.T) {
 
 func TestExecCheck(t *testing.T) {
 	testCases := []struct {
-		name         string
-		uid          uint32
-		gid          uint32
-		nodeMetadata *metadata.MapEntryMetadata
-		expected     bool
+		name            string
+		uid             uint32
+		gid             uint32
+		nodeMetadata    *metadata.MapEntryMetadata
+		currentSysadmin Sysadmin
+		expected        bool
 	}{
 		{
 			name:         "Owner exec",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b111101101},
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Owner can't exec",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b110101101},
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
+		},
+		{
+			name:         "Sysadmin Bypass",
+			uid:          1000,
+			gid:          1000,
+			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b110101101},
+			currentSysadmin: Sysadmin{
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
+				Set: true,
+			},
+			expected: true,
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
 			result := execCheck(tc.uid, tc.gid, tc.nodeMetadata)
 			if result != tc.expected {
 				t.Errorf("Expected %v, got %v", tc.expected, result)
@@ -293,30 +412,42 @@ func TestGetUIDGID(t *testing.T) {
 
 func TestCheckPermissions(t *testing.T) {
 	testCases := []struct {
-		name         string
-		ctx          context.Context
-		nodeMetadata *metadata.MapEntryMetadata
-		op           uint8
-		expected     bool
+		name            string
+		ctx             context.Context
+		nodeMetadata    *metadata.MapEntryMetadata
+		op              uint8
+		currentSysadmin Sysadmin
+		expected        bool
 	}{
 		{
 			name:         "Check for Read Perms - Accepted",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1000, Mode: 0b100000000},
 			op:           0, // read
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Check for Write Perms - Denied",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1000, Mode: 0b000000000},
 			op:           1, // write
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
 			result := CheckPermissions(tc.ctx, tc.nodeMetadata, tc.op)
 			if result != tc.expected {
 				t.Errorf("Expected %v, got %v", tc.expected, result)
@@ -364,44 +495,66 @@ func TestCheckOpenIntent(t *testing.T) {
 
 func TestCheckOpenPermissions(t *testing.T) {
 	testCases := []struct {
-		name         string
-		ctx          context.Context
-		nodeMetadata *metadata.MapEntryMetadata
-		flags        uint32
-		expected     bool
+		name            string
+		ctx             context.Context
+		nodeMetadata    *metadata.MapEntryMetadata
+		flags           uint32
+		currentSysadmin Sysadmin
+		expected        bool
 	}{
 		{
 			name:         "Open intends to write - allowed",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1000, Mode: 0b111101101},
 			flags:        syscall.O_WRONLY,
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Open intends to read - allowed",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1000, Mode: 0b111101101},
 			flags:        syscall.O_RDONLY,
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Open intends to write - not allowed",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1000, Mode: 0b101101101},
 			flags:        syscall.O_WRONLY,
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
 		},
 		{
 			name:         "Open intends to read - not allowed",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1000, Mode: 0b011101101},
 			flags:        syscall.O_RDONLY,
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
 			result := CheckOpenPermissions(tc.ctx, tc.nodeMetadata, tc.flags)
 			if result != tc.expected {
 				t.Errorf("Expected %v, got %v", tc.expected, result)
@@ -480,37 +633,66 @@ func TestCheckPermissionBits(t *testing.T) {
 
 func TestCheckMask(t *testing.T) {
 	testCases := []struct {
-		name         string
-		ctx          context.Context
-		mask         uint32
-		nodeMetadata *metadata.MapEntryMetadata
-		expected     bool
+		name            string
+		ctx             context.Context
+		mask            uint32
+		nodeMetadata    *metadata.MapEntryMetadata
+		currentSysadmin Sysadmin
+		expected        bool
 	}{
 		{
 			name:         "Owner read - allowed",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			mask:         4,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1000, Mode: 0b111101101},
-			expected:     true,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: true,
 		},
 		{
 			name:         "Group write - not allowed",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			mask:         2,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1210, Gid: 1000, Mode: 0b111101101},
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
 		},
 		{
 			name:         "Other execute - not allowed",
 			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
 			mask:         2,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1210, Gid: 2875, Mode: 0b111101100},
-			expected:     false,
+			currentSysadmin: Sysadmin{
+				UID: 1320,
+				GID: 1320,
+				Set: true,
+			},
+			expected: false,
+		},
+		{
+			name:         "Sysadmin Bypass",
+			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
+			mask:         2,
+			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1210, Gid: 2875, Mode: 0b111101100},
+			currentSysadmin: Sysadmin{
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
+				Set: true,
+			},
+			expected: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			SysAdmin = tc.currentSysadmin
 			result := CheckMask(tc.ctx, tc.mask, tc.nodeMetadata)
 			if result != tc.expected {
 				t.Errorf("Expected %v, got %v", tc.expected, result)
@@ -520,19 +702,35 @@ func TestCheckMask(t *testing.T) {
 }
 
 func getValidUID() string {
-    user, err := user.Current()
-    if err != nil {
-        return ""
-    }
-    return user.Uid
+	user, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return user.Uid
 }
 
 func getValidGID() string {
-    user, err := user.Current()
-    if err != nil {
-        return ""
-    }
-    return user.Gid
+	user, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return user.Gid
+}
+
+func uintUID(uid string) uint32 {
+	converted, err := strconv.Atoi(uid)
+	if err != nil {
+		return 999
+	}
+	return uint32(converted)
+}
+
+func uintGID(gid string) uint32 {
+	converted, err := strconv.Atoi(gid)
+	if err != nil {
+		return 999
+	}
+	return uint32(converted)
 }
 
 func TestValidUID(t *testing.T) {
@@ -628,10 +826,10 @@ func TestChangeSysadminUID(t *testing.T) {
 				t.Errorf("Expected %v. got %v\n", tc.expectedError, err)
 			}
 			if tc.expectedError == fs.OK {
-                expected, err := strconv.Atoi(tc.uid)
-                if err != nil {
-                    t.Fatal("Failed to convert UID string to int")
-                }
+				expected, err := strconv.Atoi(tc.uid)
+				if err != nil {
+					t.Fatal("Failed to convert UID string to int")
+				}
 				if SysAdmin.UID != uint32(expected) {
 					t.Errorf("Expected %v, got %v\n", expected, SysAdmin.UID)
 				}
@@ -677,10 +875,10 @@ func TestChangeSysadminGID(t *testing.T) {
 				t.Errorf("Expected %v. got %v\n", tc.expectedError, err)
 			}
 			if tc.expectedError == fs.OK {
-                expected, err := strconv.Atoi(getValidGID())
-                if err != nil {
-                    t.Fatal("Failed to convert GID string to int")
-                }
+				expected, err := strconv.Atoi(getValidGID())
+				if err != nil {
+					t.Fatal("Failed to convert GID string to int")
+				}
 				if SysAdmin.GID != uint32(expected) {
 					t.Errorf("Expected %v, got %v\n", expected, SysAdmin.GID)
 				}
