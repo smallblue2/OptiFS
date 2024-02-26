@@ -811,7 +811,9 @@ func (n *OptiFSNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 
 // Make a directory
 func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	log.Println("ENTERED MKDIR")
+
+    path := n.RPath()
+	log.Printf("MKDIR performed for {%v} in {%v}\n", name, path)
 
 	// check if the user is allowed to make a directory here
 	// i.e if we are in root, are they the sysadmin?
@@ -822,62 +824,83 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 
 	filePath := filepath.Join(n.RPath(), name)
 
+    log.Println("Looking up custom metadata for parent directory...")
 	// Check write and execute permissions on the parent directory
-	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
+	err1, dirMetadata := metadata.LookupDirMetadata(path)
 	if err1 == 0 {
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
 		if !writePerm {
-			log.Println("Not allowed!")
+			log.Println("Not allowed.")
 			return nil, fs.ToErrno(syscall.EACCES)
 		}
 		execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
 		if !execPerm {
-			log.Println("Not allowed!")
+			log.Println("Not allowed.")
 			return nil, fs.ToErrno(syscall.EACCES)
 		}
-	}
+        log.Println("Allowed!")
+	} else {
+        // If custom metadata doesn't exist for the parent, just allow them, 
+        // we realise this is a security vulnerability, but it would be incredibly
+        // difficult to abuse - if we had more time, we would tackle this
+        log.Println("Custom metadata doesn't exist, continuing...")
+    }
+
 
 	// Create the directory
+    log.Println("Creating the underlying directory...")
 	err2 := syscall.Mkdir(filePath, mode)
 	if err2 != nil {
+        log.Printf("ERROR - %v\n", err2)
 		return nil, fs.ToErrno(err2)
 	}
 	log.Println("Created the directory!")
 
-	log.Printf("Mode used: 0x%X\n", mode)
-
+    log.Println("Statting underlying directory to confirm its existence.")
 	// Now stat the new directory, ensuring it was created
 	var directoryStatus syscall.Stat_t
 	err2 = syscall.Stat(filePath, &directoryStatus)
 	if err2 != nil {
+        log.Println("Doesn't exist - how is this possible?")
 		return nil, fs.ToErrno(err2)
 	}
-	log.Println("Statted the directory!")
-
-	log.Printf("Mode statted: 0x%X\n", directoryStatus.Mode)
+	log.Println("Statted the directory succesfully!")
 
 	// Handle the node instantiation
+    log.Println("Instantiating virtual node...")
 	oErr, oInode, _ := HandleNodeInstantiation(ctx, n, filePath, name, &directoryStatus, out, nil, nil)
+    log.Printf("Node instantiated - %v\n", oErr)
 
 	// Update our custom metadata system
+    log.Println("Updating our custom metadata system...")
 	stAttr := oInode.StableAttr()
 	dirErr := metadata.UpdateDirEntry(filePath, &directoryStatus, &stAttr) // TODO: maybe migrate
-	if dirErr != 0 {
+	if dirErr != fs.OK {
+        log.Println("ERROR UPDATING ENTRY!!!")
 		return oInode, dirErr
 	}
 	finalDir, newMetadata := metadata.LookupDirMetadata(filePath)
-	if finalDir != 0 {
+	if finalDir != fs.OK {
+        log.Println("ERROR LOOKING UP ENTRY!!!")
 		return oInode, finalDir
 	}
+    log.Println("Entry sucessfully created!")
 	caller, check := fuse.FromContext(ctx)
 	if check {
+        log.Println("Updating owner to be correct...")
 		metadata.UpdateOwner(newMetadata, &caller.Uid, &caller.Gid, true)
-	}
+	} else {
+        log.Println("COULDNT UPDATE OWNER!!!")
+    }
+
+    log.Println("Finished MKDIR")
 
 	return oInode, oErr
 }
 
+// Function for setting the owner of the underlying file...
+// Not sure if we want to use this, might become redundant, leaving for now
 func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
 	// make sure we are running as root user (root user id is 0)
 	// if os.Getuid() != 0 {
@@ -914,7 +937,6 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 	// Check write and exec permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
 	if err1 == fs.OK {
-        log.Printf("Found - {%+v}\n", dirMetadata)
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
 		if !writePerm {
@@ -927,12 +949,18 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 			return nil, nil, 0, fs.ToErrno(syscall.EACCES)
 		}
         log.Println("Allowed!")
-	}
+	} else {
+        // We realise this is a security vulnerability - just allowing an operation to continue if
+        // we can't find custom metadata for it. Ultimately if we had time, we could continue to 
+        // implement better behaviour. It would also be very difficult to abuse, as all nodes in our
+        // system MUST have custom metadata, or else there's seriously incorrect behaviour going on!
+        log.Println("No custom metadata found, continuing...")
+    }
 
 	filePath := filepath.Join(path, name) // create the path for the new file
 
 	// try to open the file, OR create if theres no file to open
-    log.Println("Performing OPEn with O_CREATE flag...")
+    log.Println("Performing OPEN with O_CREATE flag...")
 	fdesc, err2 := syscall.Open(filePath, int(flags)|os.O_CREATE, mode)
     err2 = fs.ToErrno(err)
 
@@ -940,6 +968,9 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 		return nil, nil, 0, fs.ToErrno(err)
 	}
 
+    // Store the original creator in writeStore incase writes were to happen to this file (which is likely
+    // unless empty). We must do this here, as the original caller doesn't seem to perform WRITE calls in FUSE...
+    log.Println("Storing original creator in writeStore!")
 	_, ok := hashHashMap[filePath]
 	if !ok {
 		person, check := fuse.FromContext(ctx)
@@ -949,26 +980,36 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 	}
 
 	// stat the new file, making sure it was created
+    log.Println("Statting underlying file to confirm it was created.")
 	s := syscall.Stat_t{}
 	err3 := syscall.Fstat(fdesc, &s)
 	if err3 != nil {
+        log.Println("Somehow it doesn't exist - CLOSING AND EXITING!")
 		syscall.Close(fdesc) // close the file descr
 		return nil, nil, 0, fs.ToErrno(err)
 	}
+    log.Println("Confirmed to exist!")
 
 	oErr, oNode, oFile := HandleNodeInstantiation(ctx, n, filePath, name, &s, out, &fdesc, &flags)
 
     // Update the parent directory's modification and change time
+    // If we found custom metadata for the parent directory, update its timestamps
     if err1 == fs.OK { 
         now := time.Now()
         metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
     }
+
+    log.Println("Finished CREATE!")
 
 	return oNode, oFile, 0, oErr
 }
 
 // Unlinks (removes) a file
 func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
+
+    path := n.RPath()
+	log.Printf("UNLINK performed on %v from node %v\n", name, path)
+
 	// check if the user is allowed to remove a file here
 	// i.e if we are in root, are they the sysadmin?
 	aErr := n.IsAllowed(ctx)
@@ -976,10 +1017,92 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 		return fs.ToErrno(aErr)
 	}
 
-	log.Printf("UNLINK performed on %v from node %v\n", name, n.RPath())
-
 	// Check write and exec permissions on the parent directory
+    log.Println("Looking for parent directory's custom metadata...")
 	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
+	if err1 == fs.OK {
+        log.Println("Found custom metadata for parent directory!")
+		log.Println("Checking parent directory permissions")
+		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
+		if !writePerm {
+			log.Println("Not allowed!")
+			return fs.ToErrno(syscall.EACCES)
+		}
+		execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
+		if !execPerm {
+			log.Println("Not allowed!")
+			return fs.ToErrno(syscall.EACCES)
+		}
+        log.Println("Allowed!")
+	} else {
+        // We realise this is a security vulnerability - just allowing an operation to continue if
+        // we can't find custom metadata for it. Ultimately if we had time, we could continue to 
+        // implement better behaviour. It would also be very difficult to abuse, as all nodes in our
+        // system MUST have custom metadata, or else there's seriously incorrect behaviour going on!
+        log.Println("No custom metadata found, continuing...")
+    }
+
+	// Flag for custom metadata existing
+	var customExists bool
+
+	// Construct the file's path since 'n' is actually the parent directory
+	filePath := filepath.Join(n.RPath(), name)
+
+	// Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
+	// for custom metadata to cleanup
+    log.Println("Looking for node hash and ref in PERSISTENT store...")
+	herr, _, _, _, _, _, contentHash, refNum := metadata.RetrieveNodeInfo(filePath)
+	if herr == fs.OK {
+        log.Println("Found!")
+		// Mark if it exists
+		customExists = true
+	} else {
+        log.Println("Didn't find.")
+    }
+
+    log.Println("Performing unlink on underlying node...")
+	err := syscall.Unlink(filePath)
+	if err != nil {
+        log.Println("Unlink failed - EXITING!")
+		return fs.ToErrno(err)
+	}
+
+	// Cleanup the custom metadata side of things ONLY if the unlink operations suceeded
+	if customExists {
+        log.Println("Cleaning up custom metadata...")
+		metadata.RemoveRegularFileMetadata(contentHash, refNum)
+		metadata.RemoveNodeInfo(filePath)
+	}
+
+    // Update the parent directory's modification time
+    if err1 == fs.OK { 
+        log.Println("Updating parent directory's modification time.")
+        now := time.Now()
+        metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+    }
+
+    log.Println("Finished UNLINK!")
+
+	return fs.ToErrno(err)
+}
+
+// Unlinks (removes) a directory
+func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
+
+    path := n.RPath()
+	log.Printf("RMDIR performed on %v from node %v\n", name, path)
+
+	// check if the user is allowed to remove a directory here
+	// i.e if we are in root, are they the sysadmin?
+	err := n.IsAllowed(ctx)
+	if err != fs.OK {
+		return fs.ToErrno(err)
+	}
+
+	// Check exec and write permissions on the parent directory
+	// Don't need to check the directory being removed, as it must be empty to be removed
+    log.Println("Looking up parent directory's custom metadata...")
+	err1, dirMetadata := metadata.LookupDirMetadata(path)
 	if err1 == fs.OK {
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
@@ -992,83 +1115,33 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 			log.Println("Not allowed!")
 			return fs.ToErrno(syscall.EACCES)
 		}
-	}
-
-	// Flag for custom metadata existing
-	var customExists bool
-
-	// Construct the file's path since 'n' is actually the parent directory
-	filePath := filepath.Join(n.RPath(), name)
-
-	// Since 'n' is actually the parent directory, we need to retrieve the underlying node to search
-	// for custom metadata to cleanup
-	herr, _, _, _, _, _, contentHash, refNum := metadata.RetrieveNodeInfo(filePath)
-	if herr == fs.OK {
-		// Mark if it exists
-		customExists = true
-	}
-
-	err := syscall.Unlink(filePath)
-	if err != nil {
-		return fs.ToErrno(err)
-	}
-
-	// Cleanup the custom metadata side of things ONLY if the unlink operations suceeded
-	if customExists {
-		metadata.RemoveRegularFileMetadata(contentHash, refNum)
-		metadata.RemoveNodeInfo(filePath)
-	}
-
-    // Update the parent directory's modification time
-    if err1 == fs.OK { 
-        now := time.Now()
-        metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
+        log.Println("Allowed!")
+	} else { 
+        // We realise this is a security vulnerability - just allowing an operation to continue if
+        // we can't find custom metadata for it. Ultimately if we had time, we could continue to 
+        // implement better behaviour. It would also be very difficult to abuse, as all nodes in our
+        // system MUST have custom metadata, or else there's seriously incorrect behaviour going on!
+        log.Println("No custom metadata found, continuing...")
     }
-
-	return fs.ToErrno(err)
-}
-
-// Unlinks (removes) a directory
-func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
-	// check if the user is allowed to remove a directory here
-	// i.e if we are in root, are they the sysadmin?
-	err := n.IsAllowed(ctx)
-	if err != fs.OK {
-		return fs.ToErrno(err)
-	}
-
-	// Check exec and write permissions on the parent directory
-	// Don't need to check the directory being removed, as it must be empty to be removed
-	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err1 == 0 {
-		log.Println("Checking directory custom permissions")
-		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
-		if !writePerm {
-			log.Println("Not allowed!")
-			return fs.ToErrno(syscall.EACCES)
-		}
-		execPerm := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
-		if !execPerm {
-			log.Println("Not allowed!")
-			return fs.ToErrno(syscall.EACCES)
-		}
-	}
-
 	//log.Printf("RMDIR performed on %v from node %v\n", name, n.path())
 	filePath := filepath.Join(n.RPath(), name)
 
-	// See if we can remove the dir from our custom dir map first
+	// Remove the dir from our custom dir map first
+    log.Println("Removing directory entries from our maps...")
 	metadata.RemoveDirEntry(filePath)
 	metadata.RemoveNodeInfo(filePath)
 
+    log.Println("Removing directory in underlying filesystem")
 	rErr := syscall.Rmdir(filePath)
 
     // Update the parent directory's modification time
     if err1 == fs.OK { 
+        log.Println("Updating parent directory's timestamp...")
         now := time.Now()
         metadata.UpdateTime(dirMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, true)
     }
 
+    log.Println("Finished RMDIR!")
 	return fs.ToErrno(rErr)
 }
 
@@ -1083,42 +1156,47 @@ var hashHashMap = make(map[string]*writeStore) // A map keyed by a filepath and 
 var hashHashMapLock sync.RWMutex
 
 func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	//log.Println("Entered WRITE")
+
+    nodePath := n.RPath()
+	log.Printf("WRITE performed on %v\n", nodePath)
+
 	if f != nil {
+
+        log.Println("Filehandle exists...")
+
 		// Lock the file
 		f.(*OptiFSFile).mu.Lock()
 		defer f.(*OptiFSFile).mu.Unlock()
 
-		nodePath := n.RPath()
-
-		// Check if n's attributes are default
-		var defaultByteArray [64]byte
-		var hash [64]byte
-		var ref uint64
-		if n.currentHash == defaultByteArray || n.refNum == 0 {
-			// Retrieve from the persisten store
-			_, _, _, _, _, _, tmpHash, tmpRef := metadata.RetrieveNodeInfo(nodePath)
-			hash = tmpHash
-			ref = tmpRef
-		} else {
-			hash = n.currentHash
-			ref = n.refNum
-		}
+        // Retrieve hash and ref num from filehandle...
+        log.Println("Retrieving hash and refnum from filehandle...")
+        hash := f.(*OptiFSFile).currentHash
+        ref := f.(*OptiFSFile).refNum
 
 		// Ensure we have permission to write to the file
 		// Check if we have permission to write to the file
+        log.Println("Retrieving file's custom metadata...")
 		err, fileMetadata := metadata.LookupRegularFileMetadata(hash, ref)
 		if err == fs.OK { // if it exists
+            log.Println("Found!")
 			writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1) // check write perm
 			if !writePerm {
+                log.Println("Not allowed!")
 				return 0, syscall.EACCES
 			}
-		}
-
-		//log.Println("We have permission!")
+            log.Println("Allowed!")
+		} else {
+            // We realise this is a security vulnerability - just allowing an operation to continue if
+            // we can't find custom metadata for it. Ultimately if we had time, we could continue to 
+            // implement better behaviour. It would also be very difficult to abuse, as all nodes in our
+            // system MUST have custom metadata, or else there's seriously incorrect behaviour going on!
+            log.Println("No custom metadata found, continuing...")
+        }
 
 		// Hash the content
+        log.Println("Hashing the write block content...")
 		newHash := hashing.HashContents(data, f.(*OptiFSFile).flags)
+
 		// Store the hash in the hashHashMap
 		// See if an entry exists
 		log.Println("Requesting hashHashMapLock")
@@ -1131,10 +1209,11 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 			} else {
 				(*entry).buffer.Write(newHash[:])
 			}
+            log.Println("Filled byte buffer with hash...")
 		} else {
 			// Buffer doesn't exist, create a new one
 			// Extract UID and GID (doesn't work in RELEASE for some reason, so we store caller info here)
-			log.Println("Setting UID/GID in hash buffer")
+			log.Println("Setting UID/GID in hash buffer AND filling...")
 			caller, check := fuse.FromContext(ctx)
 			var entry *writeStore
 			if !check {
@@ -1149,23 +1228,21 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 		log.Println("Released hashHashMapLock")
 
 		// Now write to the underlying file
-		//log.Println("Performing normal write")
+		log.Println("Writing to the underlying node...")
 		numOfBytesWritten, werr := syscall.Pwrite(f.(*OptiFSFile).fdesc, data, off)
 		if werr != nil {
-			//log.Println("Error performing normal write!")
+			log.Println("ERROR PERFORMING NORMAL WRITE!")
 			return 0, fs.ToErrno(werr)
 		}
 
         // Update file's mtime
         if err == fs.OK {
+            log.Println("Updating the node's timestamps in custom metadata...")
             now := time.Now()
             metadata.UpdateTime(fileMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, nil, false)
         }
 
-		// Hopefully force the kernel to re-lookup
-		refreshMemory(&n.Inode)
-
-		//log.Println("Wrote to file succesfully")
+		log.Println("Wrote to file succesfully")
 		return uint32(numOfBytesWritten), fs.OK
 	}
 
@@ -1175,36 +1252,36 @@ func (n *OptiFSNode) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 }
 
 func (n *OptiFSNode) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	//log.Println("ENTERED FLUSH")
+
+    path := n.RPath()
+	log.Printf("FLUSH performed on {%v}\n", path)
 	if f != nil {
 		return f.(fs.FileFlusher).Flush(ctx)
 	}
-	//log.Println("FLUSH - EBADFD")
+	log.Println("FLUSH - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
 // FUSE's version of a close
 func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	log.Printf("ENTERED RELEASE - {%v}\n", n.RPath())
+
+    nodePath := n.RPath()
+	log.Printf("RELEASE performed by {%v}\n", nodePath)
 
 	if f != nil {
 
 		flags := f.(*OptiFSFile).flags
 
-		hashHashMapLock.Lock()
+        log.Println("Checking flags for write intent...")
 		// Big check here to REALLY make sure we want to perform deduplication steps
 		// Flags have to have write intend AND the bytebuffer for the file can't be empty
 		if !(flags&syscall.O_WRONLY == syscall.O_WRONLY || flags&syscall.O_RDWR == syscall.O_RDWR ||
 			flags&syscall.O_CREAT == syscall.O_CREAT || flags&syscall.O_TRUNC == syscall.O_TRUNC ||
 			flags&syscall.O_APPEND == syscall.O_APPEND) {
-			hashHashMapLock.Unlock()
 			log.Println("No writing intent, simply releasing file")
 			return f.(*OptiFSFile).Release(ctx)
 		}
-		hashHashMapLock.Unlock()
 		log.Println("Writing intent, continuing to perform de-duplication steps")
-
-		defer refreshMemory(&n.Inode)
 
 		// These will be defined from writeStore below, to tell who originally performed the write
 		var callerUid uint32
@@ -1215,7 +1292,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 		hashHashMapLock.Lock()
 		var newHash [64]byte
 		if hashHashMap != nil {
-			writeStore, ok := hashHashMap[n.RPath()]
+			writeStore, ok := hashHashMap[nodePath]
 			if ok {
 				if writeStore.buffer != nil {
 					newHash = hashing.HashContents(writeStore.buffer.Bytes(), 0)
@@ -1224,9 +1301,9 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 				callerGid = writeStore.gid
 				log.Printf("Final hash computed for file: {%x}\n", newHash)
 				// Get rid of hashmap entry
-				delete(hashHashMap, n.RPath())
+				delete(hashHashMap, nodePath)
 			} else {
-				log.Println("No available hash, file must be empty!")
+				log.Println("NO AVAILABLE HASH, FILE MUST BE EMPTY!")
 			}
 		} else {
 			log.Println("No hashHashMapLock, how did this happen?")
@@ -1234,22 +1311,9 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 		hashHashMapLock.Unlock()
 		log.Println("Released hashHashMapLock")
 
-		// Save the path
-		nodePath := n.RPath()
-
 		// Check if n's attributes are default
-		var defaultByteArray [64]byte
-		var hash [64]byte
-		var ref uint64
-		if n.currentHash == defaultByteArray || n.refNum == 0 {
-			// Retrieve from the persisten store
-			_, _, _, _, _, _, tmpHash, tmpRef := metadata.RetrieveNodeInfo(nodePath)
-			hash = tmpHash
-			ref = tmpRef
-		} else {
-			hash = n.currentHash
-			ref = n.refNum
-		}
+        hash := f.(*OptiFSFile).currentHash
+        ref := f.(*OptiFSFile).refNum
 
 		// Keep the old metadata if it exists
 		err1, oldMetadata := metadata.LookupRegularFileMetadata(hash, ref)
@@ -1261,6 +1325,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 
 		// If it's unique - CREATE a new MapEntry
 		if isUnique {
+            log.Println("File is unique, creating a new MapEntry...")
 			metadata.CreateRegularFileMapEntry(newHash)
 			log.Println("Created a regular file MapEntry")
 			// If it already exists, simply retrieve it
@@ -1271,8 +1336,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 			log.Println("MapEntry doesn't exist!")
 			return fs.ToErrno(syscall.ENODATA) // return EAGAIN if we error here, not sure what is appropriate...
 		}
-		log.Println("Confirmed regular file MapEntry exists")
-
+		log.Println("Retrieved existing MapEntry...")
 		log.Printf("Entry index num: {%v}\n", entry.IndexCounter)
 
 		// Find an instance of a duplicate file incase we need to do de-duplication
@@ -1288,11 +1352,12 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 
 		// Update our persistence hash
 		metadata.UpdateNodeInfo(nodePath, nil, nil, nil, &newHash, &newRef)
-		log.Println("Updated node info")
+		log.Println("Updated our persistent hash")
 
 		// Perform the deduplication
 		if !isUnique {
 
+            log.Println("Isn't unique, releasing filehandle...")
 			// If it's not unique, close the file - we're getting rid of it
 			f.(fs.FileReleaser).Release(ctx)
 
@@ -1308,6 +1373,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 			// Create a tmpFilename to perform all operations on
 			tmpFilePath := nodePath + "~(TMP)"
 			// Create a hardlink to tmpFileName
+            log.Printf("Creating hardlink in underlying filesystem at {%v}\n", tmpFilePath)
 			linkErr := syscall.Link(rec.Path, tmpFilePath)
 			if linkErr != nil {
 				log.Printf("Failed to make temporary link - {%v} - exiting", linkErr)
@@ -1342,7 +1408,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 			if err1 == fs.OK {
 				metadata.MigrateDuplicateFileMetadata(oldMetadata, fileMetadata, &st)
 				metadata.RemoveRegularFileMetadata(newHash, newRef)
-				log.Println("Updated metadata through migrating old metadata")
+				log.Println("Migrated old metadata over to new metadata")
 			} else {
 				log.Println("No previous metadata available, creating a new file to simulate the new file metadata")
 				// Otherwise very cheeky operation - create a new file and copy the metadata to simulate the metadata
@@ -1379,17 +1445,18 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 					log.Println("Failed to apply new custom metadata - UH OH")
 					// TODO: figure out how to atomically revert from here or implement some kind of metadata
 				}
-				log.Println("Succesfully updated custom metadata!")
+				log.Println("Succesfully created metadata for new file that was duplicate")
 			}
 
 			log.Println("Finished de-duplicating file!")
-            // Update the gen number
-            metadata.UpdateGenNumber(fileMetadata, false)
+
             // Update the times
             now := time.Now()
             metadata.UpdateTime(fileMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, false)
+            log.Println("Updated timestamp for duplicate file metadata.")
 
 			return fs.OK
+
 		} else {
 			log.Println("Simply updating metadata, file is unique")
 
@@ -1417,16 +1484,10 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 
 			log.Println("Closing the file now!")
 
-			// Attempt at forcing syncing - having caching issues
-			//unix.FcntlInt(uintptr(f.(*OptiFSFile).fdesc), 0x101000, 0)
-
-			// Hopefully force the kernel to re-lookup
-
-            // Update the gen number
-            metadata.UpdateGenNumber(fileMetadata, false)
             // Update the times
             now := time.Now()
             metadata.UpdateTime(fileMetadata, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, false)
+            log.Println("Updated timestamp of unique file.")
 
 			return f.(fs.FileReleaser).Release(ctx)
 		}
@@ -1437,18 +1498,14 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 	return syscall.EBADFD // bad file descriptor
 }
 
-func refreshMemory(n *fs.Inode) {
-	dirname, dirino := n.Parent()
-	log.Printf("NOTIFYING ENTRY, {%v} - {%v}\n", dirname, dirino.Path(nil))
-	log.Printf("Children; {%v}\n", dirino.Children())
-	dirino.NotifyEntry(dirname)
-}
-
 func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
-	//log.Println("ENTERED FSYNC")
+
+    path := n.RPath()
+	log.Printf("FSYNC performed at {%v}\n", path)
+
 	if f != nil {
 		// Check write permission
-		err, fileMetadata := metadata.LookupRegularFileMetadata(n.currentHash, n.refNum)
+		err, fileMetadata := metadata.LookupRegularFileMetadata(f.(*OptiFSFile).currentHash, f.(*OptiFSFile).refNum)
 		if err == fs.OK {
 			writePerm := permissions.CheckPermissions(ctx, fileMetadata, 1)
 			if !writePerm {
@@ -1458,7 +1515,7 @@ func (n *OptiFSNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) s
 
 		return f.(fs.FileFsyncer).Fsync(ctx, flags)
 	}
-	//log.Println("FSYNC - EBADFD")
+	log.Println("FSYNC - EBADFD")
 	return syscall.EBADFD // bad file descriptor
 }
 
@@ -1659,14 +1716,17 @@ func (n *OptiFSNode) renameExchange(name string, newparent fs.InodeEmbedder, new
 
 // Creates a node that isn't a regular file/dir/node - like device nodes or pipes
 func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+
+
+    path := n.RPath()
+    log.Printf("MKNOD performed for {%v} by {%v}\n", name, path)
+
 	// check if the user is allowed to make a node here
 	// i.e if we are in root, are they the sysadmin?
 	err := n.IsAllowed(ctx)
 	if err != fs.OK {
 		return nil, fs.ToErrno(err)
 	}
-
-	path := n.RPath()
 
 	// Check the write and execute permissions of the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
