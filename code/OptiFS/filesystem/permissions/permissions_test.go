@@ -187,8 +187,8 @@ func TestCheckMode(t *testing.T) {
 			groupFlag:    0b000000100, // group read
 			otherFlag:    0,
 			currentSysadmin: Sysadmin{
-				UID: 1000,
-				GID: 1000,
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
 				Set: true,
 			},
 			expected: true,
@@ -245,8 +245,8 @@ func TestReadCheck(t *testing.T) {
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b011101101},
 			currentSysadmin: Sysadmin{
-				UID: 1000,
-				GID: 1000,
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
 				Set: true,
 			},
 			expected: true,
@@ -302,8 +302,8 @@ func TestWriteCheck(t *testing.T) {
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b101101101},
 			currentSysadmin: Sysadmin{
-				UID: 1000,
-				GID: 1000,
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
 				Set: true,
 			},
 			expected: true,
@@ -360,8 +360,8 @@ func TestExecCheck(t *testing.T) {
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b110101101},
 			currentSysadmin: Sysadmin{
-				UID: 1000,
-				GID: 1000,
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
 				Set: true,
 			},
 			expected: true,
@@ -682,8 +682,8 @@ func TestCheckMask(t *testing.T) {
 			mask:         2,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1210, Gid: 2875, Mode: 0b111101100},
 			currentSysadmin: Sysadmin{
-				UID: 1000,
-				GID: 1000,
+				UID: uintUID(getValidUID()),
+				GID: uintGID(getValidGID()),
 				Set: true,
 			},
 			expected: true,
@@ -715,6 +715,22 @@ func getValidGID() string {
 		return ""
 	}
 	return user.Gid
+}
+
+func uintUID(uid string) uint32 {
+	converted, err := strconv.Atoi(uid)
+	if err != nil {
+		return 999
+	}
+	return uint32(converted)
+}
+
+func uintGID(gid string) uint32 {
+	converted, err := strconv.Atoi(gid)
+	if err != nil {
+		return 999
+	}
+	return uint32(converted)
 }
 
 func TestValidUID(t *testing.T) {
