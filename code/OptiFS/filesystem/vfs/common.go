@@ -309,7 +309,8 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 	// TRY AND FIND CUSTOM NODE
 	ferr, sIno, sMode, sGen, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
-	if ferr != fs.OK { // If custom node doesn't exist, create a new one
+    // If we got an error (it doesn't exist) OR we have an uninitialised node (ref == 0, hash == [000...000])
+	if ferr != fs.OK || (existingRef == 0 && existingHash == [64]byte{}) { // If custom node doesn't exist, create a new one
 
 		log.Println("Persistent node entry doesn't exist")
 
