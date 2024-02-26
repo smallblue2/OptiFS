@@ -90,16 +90,17 @@ var _ = (fs.NodeReadlinker)((*OptiFSNode)(nil)) // For reading symlinks
 // Statfs implements statistics for the filesystem that holds this
 // Inode.
 func (n *OptiFSNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	log.Println("IN STATFS")
+	log.Println("Statting filesystem...")
 	// As this is a loopback filesystem, we will stat the underlying filesystem.
 	var s syscall.Statfs_t = syscall.Statfs_t{}
 	err := syscall.Statfs(n.RPath(), &s)
 	if err != nil {
-		log.Println("Failed to stat underlying!")
+		log.Println("Failed to stat underlying.")
 		return fs.ToErrno(err)
 	}
 	log.Printf("%v\n", s)
 	out.FromStatfsT(&s)
+    log.Println("Statted filesystem succesfully!")
 	return fs.OK
 }
 
@@ -116,53 +117,64 @@ func (n *OptiFSNode) IsRoot() bool {
 	return n.Inode.Root() == &n.Inode
 }
 
-// checker to see if we are allowed to perform operations at the current location
-func (n *OptiFSNode) IsAllowed(ctx context.Context) error {
+// checker to see if we are allowed to perform operations at the current location (specifically with root)
+func (n *OptiFSNode) IsAllowed(ctx context.Context) syscall.Errno {
+
+    // Logging
+    path := n.RPath()
+    log.Printf("Performing check for ROOT directory at {%v}\n", path)
+
 	// if we're in the root directory
 	if n.IsRoot() {
-		log.Println(">>> WE ARE IN ROOT!!!!!")
+		log.Println("We are in the ROOT directory!")
 		err, userID, groupID := permissions.GetUIDGID(ctx) // get the UID/GID of the person doing the syscall
 		if err != fs.OK {
-			log.Println("ERROR GETTING UID/GID")
+			log.Println("ERROR GETTING UID/GID OF CALLER")
 			return fs.ToErrno(err)
 		}
 
 		// if they are not the sysadmin, they can't operate in root!
 		if userID != permissions.SysAdmin.UID || groupID != permissions.SysAdmin.GID {
-			log.Println("Only the syadmin can do operations in root :(")
+            log.Printf("User (UID: {%v}, GID: {%v}) is not allowed to perform operations in the ROOT directory\n", userID, groupID)
+			log.Println("Only the syadmin can do operations in root.")
 			return fs.ToErrno(syscall.EACCES)
 		}
 	} else {
-		log.Println(">>> WE ARE NOT IN ROOT!")
+		log.Println("We are not in the ROOT directory, continue...")
 	}
 
-	return nil
+	return fs.OK
 }
 
 // checker to see if we are allowed to perform operations in the source and destination specified
-func (n *OptiFSNode) IsAllowedTwoLocations(ctx context.Context, newParent fs.InodeEmbedder) error {
+func (n *OptiFSNode) IsAllowedTwoLocations(ctx context.Context, newParent fs.InodeEmbedder) syscall.Errno {
+
+    // Logging
+    path := n.RPath()
+    opath := newParent.EmbeddedInode().Path(nil)
+    log.Printf("Performing check for ROOT directory at {%v} and {%v}\n", path, opath)
 
 	dest := newParent.EmbeddedInode() // get the inode of the destination
 
 	// if the source or the destination is in the root directory
 	if n.IsRoot() || dest.IsRoot() {
-		log.Println(">>> SRC OR DEST IS IN ROOT!!!!!")
 		err, userID, groupID := permissions.GetUIDGID(ctx) // get the UID/GID of the person doing the syscall
 		if err != fs.OK {
-			log.Println("ERROR GETTING UID/GID")
+			log.Println("ERROR GETTING UID/GID OF CALLER")
 			return fs.ToErrno(err)
 		}
 
 		// if they are not the sysadmin, they can't operate in root!
 		if userID != permissions.SysAdmin.UID || groupID != permissions.SysAdmin.GID {
-			log.Println("Only the syadmin can do operations in root :(")
+            log.Printf("User (UID: {%v}, GID: {%v}) is not allowed to perform operations in the ROOT directory\n", userID, groupID)
+			log.Println("Only the syadmin can do operations in root.")
 			return fs.ToErrno(syscall.EACCES)
 		}
 	} else {
-		log.Println(">>> SRC OR DEST IS NOT IN ROOT!")
+		log.Println("We are not in the ROOT directory, continue...")
 	}
 
-	return nil
+	return fs.OK
 }
 
 // create a new node in the system
@@ -192,6 +204,9 @@ func (n *OptiFSRoot) existingNode(existingHash [64]byte, existingRef uint64) fs.
 // since we're using NFS, theres a chance not all Inode numbers will be unique, so we
 // calculate one using bit swapping
 func (n *OptiFSRoot) getNewStableAttr(s *syscall.Stat_t, path *string) fs.StableAttr {
+
+    log.Println("Generating new stable attr...")
+
 	// Otherwise, generate a new one
 	inodeInfoString := fmt.Sprintf("%s%d%d", *path, s.Dev, s.Ino)
 	inodeInfo := []byte(inodeInfoString)
@@ -216,12 +231,12 @@ func (n *OptiFSNode) GetAttr() fs.StableAttr {
 func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	path := n.RPath()
 
-	log.Printf("LOOKUP performed for {%v} from node {%v}\n", name, path)
+	log.Printf("LOOKUP performed for {%v} from node {%v}...\n", name, path)
 
 	// Check execute permissions on the parent directory
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
 	if err1 == 0 {
-		log.Println("Checking directory custom permissions")
+		log.Println("Checking permissions of parent directory...")
 		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
 		if !isAllowed {
 			log.Println("Not allowed!")
@@ -235,11 +250,13 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	err := syscall.Lstat(filePath, &s)         // gets the file attributes (also returns attrs of symbolic link)
 
 	if err != nil {
-		log.Println("LOOKUP FAILED!")
+		log.Printf("Underlying stat at {%v} failed!\n", filePath)
 		return nil, fs.ToErrno(err)
 	}
 
 	oErr, oNode, _ := HandleNodeInstantiation(ctx, n, filePath, name, &s, out, nil, nil)
+
+    log.Println("Finished LOOKUP!")
 
 	return oNode, oErr
 }
@@ -247,16 +264,15 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 // opens a directory and then closes it
 func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 
-	log.Println("In OPENDIR!")
-
 	path := n.RPath()
-	log.Printf("Opening directory '%v'\n", path)
+	log.Printf("OPENDIR performed for {%v}...\n", path)
+
 
 	// Check exec permissions if there is custom metadata
     var customExists bool
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
 	if err1 == fs.OK {
-		log.Println("Checking directory custom permissions")
+		log.Println("Checking directory permissions...")
 		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 2) // Check exec permissions
 		if !isAllowed {
 			log.Println("Not allowed!")
@@ -264,8 +280,9 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
 		}
         customExists = true
 	}
+    log.Println("Allowed!")
 
-	log.Printf("Attempting to open dir - {%v}\n", path)
+	log.Println("Attempting to open underlying directory...")
 
 	// Open the directory (n), 0755 is the default perms for a new directory
 	dir, err2 := syscall.Open(n.RPath(), syscall.O_DIRECTORY, 0755)
@@ -277,62 +294,74 @@ func (n *OptiFSNode) Opendir(ctx context.Context) syscall.Errno {
     if customExists {
         now := time.Now()
         metadata.UpdateTime(dirMetadata, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, nil, nil, true)
+        log.Println("Updating directory's timestamps in custom metadata.")
     }
+
 	syscall.Close(dir) // close when finished
-	log.Println("Succesfully opened directory!")
+	log.Println("Succesfully finished OPENDIR!")
 	return fs.OK
 }
 
 // opens a stream of dir entries,
 func (n *OptiFSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
-	log.Println("Entered Readdir!")
-
 	path := n.RPath()
+	log.Printf("READDIR performed for {%v}...\n", path)
 
 	// Check read permissions if available
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
-	if err1 == 0 {
+	if err1 == fs.OK {
+        log.Println("Checking permissions of directory...")
 		isAllowed := permissions.CheckPermissions(ctx, dirMetadata, 0)
 		if !isAllowed {
 			log.Println("Not allowed!")
 			return nil, fs.ToErrno(syscall.EACCES)
 		}
-		log.Println("Allowed to readdir!")
+		log.Println("Allowed!")
 	}
 
+    log.Println("Succesfully performed READDIR!")
 	return fs.NewLoopbackDirStream(path)
 }
 
 // get the attributes of a file/dir, either with a filehandle (if passed) or through inodes
 func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	log.Println("NODE || entered GETATTR")
 
 	path := n.RPath()
+	log.Printf("GETATTR performed for {%v}...\n", path)
+
 
 	// Not sure if attributes carry over node Lookups, check persistent storage to be sure
+    log.Println("Searching for hash and ref IN PERSISTENT STORE...")
 	var existingHash [64]byte
 	var existingRef uint64
-	if err, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == fs.OK {
+	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(path); err == fs.OK {
+        log.Println("Found!")
 		existingHash = hash
 		existingRef = ref
-	}
 
-    log.Println("Made it past RetrieveNodeInfo!")
-
-    // Try and get an entry in our own custom system
-    err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
-    if err1 == fs.OK { // If it exists
-        log.Println("Found custom file metadata!")
-        metadata.FillAttrOut(fileMetadata, out)
-        return fs.OK
+        if isDir {
+            log.Println("Looking up regfile custom metadata...")
+            // Try and get an entry in our own custom system
+            err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
+            if err1 == fs.OK { // If it exists
+                log.Println("Found custom file metadata!")
+                metadata.FillAttrOut(fileMetadata, out)
+                return fs.OK
+            }
+        } else {
+            log.Println("Looking up directory custom metadata...")
+            err2, dirMetadata := metadata.LookupDirMetadata(path)
+            if err2 == 0 {
+                log.Println("Found custom directory metadata!")
+                metadata.FillAttrOut(dirMetadata, out)
+                return fs.OK
+            }
+        }
+	} else {
+        log.Println("Not found!")
     }
-	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == 0 {
-        log.Println("Found custom directory metadata!")
-		metadata.FillAttrOut(dirMetadata, out)
-		return fs.OK
-	}
+
 
 	log.Println("No custom metadata available - Statting underlying node")
 
@@ -342,32 +371,31 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	if f == nil {
 		// IF we're dealing with the root, stat it directly as opposed to handling symlinks
 		if &n.Inode == n.Root() {
-			log.Printf("Trying to stat the root - %v\n", path)
+			log.Printf("Trying to stat the ROOT directory, handling specially - %v\n", path)
 			err = syscall.Stat(path, &s) // if we are looking for the root of FS
 		} else {
 			// Otherwise, use Lstat to handle symlinks as well as normal files/directories
-			log.Println("Statting regular filesystem node")
+			log.Println("Statting regular filesystem node...")
 			err = syscall.Lstat(path, &s) // if it's just a normal file/dir
 		}
 
 		if err != nil {
-			log.Printf("We got an error - %v\n", err)
+			log.Printf("Statting the underlying filesystem node failed - %v.\n", err)
 			return fs.ToErrno(err)
 		}
 		log.Printf("Succesfully statted {%v} - {%v}\n", path, s)
 	} else {
-		log.Println("Statting through file descriptor")
+		log.Println("Statting node through file descriptor...")
 		serr := syscall.Fstat(f.(*OptiFSFile).fdesc, &s) // stat the file descriptor to get the attrs (no path needed)
 
 		if serr != nil {
+            log.Println("Failed underlying stat.")
 			return fs.ToErrno(serr)
 		}
-
-		log.Printf("Stat - %v\n", s)
-
 	}
 
 	out.FromStat(&s) // fill the attr into struct if no errors
+    log.Println("Filled out attributes - GETATTR finished!")
 
 	return fs.OK
 }
@@ -375,7 +403,8 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 // Sets attributes of a node
 func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 
-	log.Println("NODE || entered SETATTR")
+    path := n.RPath()
+	log.Printf("SETATTR performed for {%v}...\n", path)
 
 	// Retrieve persisten data as 'n' may have empty attributes as lookups are performed as *fs.Inode's, as opposed to
 	// *OptiFSNode, so it seems like attributes cannot always carry across operations
@@ -385,243 +414,348 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 	var isDir bool
 
 	// Search for persistent hash or ref's
-	log.Println("Searching for persistently stored hash and ref")
-	if err, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath()); err == fs.OK && !isDir {
+	log.Println("Searching for hash and ref in PERSISTENT STORE...")
+	if err, _, _, _, _, tmpIsDir, hash, ref := metadata.RetrieveNodeInfo(path); err == fs.OK && !isDir {
 		existingHash = hash
 		existingRef = ref
-		log.Printf("Found - {%v} - {%+v}\n", existingHash, existingRef)
+        isDir = tmpIsDir
+		log.Printf("Found! {%v} - {%+v}\n", existingHash, existingRef)
+        log.Println("Updating custom metadata...")
+
+        // Check to see if we can find an entry in our node hashmap
+        if !isDir {
+            log.Println("Updating regfile entry...")
+            err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
+            if err1 == fs.OK {
+                log.Println("Setting attributes for custom regular file metadata.")
+                if f != nil {
+                    return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, f.(*OptiFSFile), out, isDir))
+                }
+                return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, nil, out, isDir))
+            }
+        } else {
+            log.Println("Updating dir entry...")
+            // Also check to see if we can find an entry in our directory hashmap
+            err2, dirMetadata := metadata.LookupDirMetadata(n.RPath())
+            if err2 == 0 {
+                log.Println("Setting attributes for custom directory metadata.")
+                if f != nil {
+                    return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, f.(*OptiFSFile), out, isDir))
+                }
+                return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, nil, out, isDir))
+            }
+        }
 	} else {
 		log.Println("No persistent regfile data found!")
-		isDir = true
 	}
 
-	// Check to see if we can find an entry in our node hashmap
-	err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
-	if err1 == fs.OK {
-		log.Println("Setting attributes for custom regular file metadata.")
-		if f != nil {
-			return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, f.(*OptiFSFile), out, isDir))
-		}
-		return fs.ToErrno(SetAttributes(ctx, fileMetadata, in, n, nil, out, isDir))
-	}
-	// Also check to see if we can find an entry in our directory hashmap
-	err2, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err2 == 0 {
-		log.Println("Setting attributes for custom directory metadata.")
-		if f != nil {
-			return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, f.(*OptiFSFile), out, isDir))
-		}
-		return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, nil, out, isDir))
-	}
+    // We don't really care if there is no custom metadata entry (yet), just return OK
+    // fs.ToErrno(SetAttributes(ctx, nil, in, n, nil, out, isDir)) <- alternative, but we don't know if it's a directory or not...
 
-	// Otherwise, neither exists; just do underlying node
-	log.Println("Setting attributes for underlying node.")
-	return fs.ToErrno(SetAttributes(ctx, nil, in, n, nil, out, isDir))
+	log.Println("No custom metadata entry for this node, ignoring.")
+	return fs.OK
 }
 
 // Opens a file for reading, and returns a filehandle
 // flags determines how we open the file (read only, read-write, etc...)
 func (n *OptiFSNode) Open(ctx context.Context, flags uint32) (f fs.FileHandle, fFlags uint32, errno syscall.Errno) {
 
-	log.Println("ENTERED OPEN")
-
-	path := n.RPath()
+    path := n.RPath()
+	log.Printf("OPEN performed for {%v}...\n", path)
 
 	// Not sure if ACCESS is checked for opening a file
 	log.Printf("\n=======================\nOpen Flags: (0x%v)\n=======================\n", strconv.FormatInt(int64(flags), 16))
 
 	// Not sure file attributes are persisten between lookups, better to retrieve from persisten store
 	// instead of node
+    log.Println("Retrieving hash and ref from PERSISTENT store...")
 	var existingHash [64]byte
 	var existingRef uint64
 	if err, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(path); err == fs.OK {
-		log.Println("Persisten hash and ref exists for file")
 		existingHash = hash
 		existingRef = ref
-	}
+		log.Printf("Persistent hash and ref exists for node! {%v} - {%+v}\n", existingRef, existingHash)
 
-	// Check custom permissions for opening the file
-	// Lookup metadata entry
-	herr, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
-	if herr == fs.OK { // If we found custom metadata
-		log.Println("Checking custom metadata for OPEN permission")
-		allowed := permissions.CheckOpenPermissions(ctx, fileMetadata, flags)
-		if !allowed {
-			log.Println("Not allowed!")
-			return nil, 0, syscall.EACCES
-		}
-	}
+        log.Println("Looking up node custom metadata...")
+        // Check custom permissions for opening the file
+        // Lookup metadata entry
+        herr, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
+        if herr == fs.OK { // If we found custom metadata
+            log.Println("Found!")
+            log.Println("Checking OPEN permissions...")
+            allowed := permissions.CheckOpenPermissions(ctx, fileMetadata, flags)
+            if !allowed {
+                log.Println("Not allowed!")
+                return nil, 0, syscall.EACCES
+            }
+            log.Println("Allowed!")
+        }
+	} else {
+        log.Println("Persistent hash and ref don't exist for node...")
+        // Consciously decided not to perform any permission checks if custom metadata doesn't exist
+        // This is likely a security issue, but I imagine it must be very difficult to abuse this...
+    }
 
+    log.Println("Opening underlying node...")
 	fileDescriptor, err := syscall.Open(path, int(flags), 0666) // try to open the file at path
 	if err != nil {
+        log.Println("Opening underlying node failed.")
 		return nil, 0, fs.ToErrno(err)
 	}
 
+    log.Println("Creating new OptiFSFile...")
 	// Creates a custom filehandle from the returned file descriptor from Open
 	optiFile := NewOptiFSFile(fileDescriptor, n.GetAttr(), flags, existingHash, existingRef)
 	//log.Println("Created a new loopback file")
+    log.Println("Succesfully finished OPEN!")
 	return optiFile, flags, fs.OK
 }
 
 // Get EXTENDED attribute
 func (n *OptiFSNode) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
-	log.Println("ENTERED GETXATTR")
+
+    path := n.RPath()
+	log.Printf("GETXATTR performed for {%v}...\n", path)
 
 	// If we're dealing with the root, just return FS.OK
 	if &n.Inode == n.Root() {
+        log.Println("We're dealing with the ROOT directory, ignore and return OK")
 		return 0, fs.OK
 	}
 
 	// Retrieve hash and refnums from persistent node
-	_, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+    log.Println("Looking in PERSISTENT store for hash and ref...")
+	err0, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+    if err0 != fs.OK {
+        log.Println("Persistent data doesn't exist, returnin ENODATA.")
+        return 0, fs.ToErrno(syscall.ENODATA)
+    }
+    log.Printf("Found persistent data. {%v} - {%+v}\n", hash, ref)
 
 	// Check if the user has read access
 	var customMetadata *metadata.MapEntryMetadata
-	var isDir bool
-	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-	if err1 == fs.OK {
-		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
-		if !hasRead {
-			return 0, syscall.EACCES
-		}
-		customMetadata = nodeMetadata
-		log.Println("Set metadata to regfile metadata")
-	}
-	path := n.RPath()
-	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == 0 {
-		hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
-		if !hasRead {
-			return 0, syscall.EACCES
-		}
-		customMetadata = dirMetadata
-		isDir = true
-		log.Println("Set metadata to dir metadata")
-	}
+    if !isDir {
+        log.Println("Dealing with a regfile!")
+        log.Println("Searching for custom metadata...")
+        err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
+        if err1 == fs.OK {
+            log.Println("Found custom metadata!")
+            log.Println("Checking permissions...")
+            hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
+            if !hasRead {
+                log.Println("Not allowed.")
+                return 0, syscall.EACCES
+            }
+            log.Println("Allowed.")
+            customMetadata = nodeMetadata
+        }
+    } else {
+        log.Println("Dealing with a directory!")
+        log.Println("Searching for custom metadata...")
+        err2, dirMetadata := metadata.LookupDirMetadata(path)
+        if err2 == 0 {
+            log.Println("Found custom metadata!")
+            log.Println("Checking permissions...")
+            hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
+            if !hasRead {
+                log.Println("Not allowed.")
+                return 0, syscall.EACCES
+            }
+            log.Println("Allowed.")
+            customMetadata = dirMetadata
+        }
+    }
 
+    log.Println("Getting XAttr from custom metadata...")
 	attributeSize, err3 := metadata.GetCustomXAttr(customMetadata, attr, &dest, isDir)
+    log.Printf("Finished GETXATTR! {%v} - {%v}\n", attributeSize, err3)
+
 	return uint32(attributeSize), fs.ToErrno(err3)
 }
 
 // Set EXTENDED attribute
 func (n *OptiFSNode) Setxattr(ctx context.Context, attr string, data []byte, flags uint32) syscall.Errno {
-	log.Println("ENTERED SETXATTR")
+
+    path := n.RPath()
+	log.Printf("SETXATTR performed for {%v}...\n", path)
 
 	// If we're dealing with the root, just return FS.OK
 	if &n.Inode == n.Root() {
+        log.Println("We're dealing with the ROOT directory, ignore and return OK")
 		return fs.OK
 	}
 
 	// Retrieve hash and refnums from persistent node
-	_, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+    log.Println("Looking in PERSISTENT store for hash and ref...")
+	err0, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+    if err0 != fs.OK {
+        log.Println("Persistent data doesn't exist, returnin ENODATA.")
+        return fs.ToErrno(syscall.ENODATA)
+    }
+    log.Printf("Found persistent data. {%v} - {%+v}\n", hash, ref)
 
 	// Check if the user has write access
 	var customMetadata *metadata.MapEntryMetadata
-	var isDir bool
-	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-	if err1 == fs.OK {
-		hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
-		if !hasWrite {
-			return syscall.EACCES
-		}
-		customMetadata = nodeMetadata
-		log.Println("Set metadata to regfile metadata")
-	}
-	path := n.RPath()
-	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == 0 {
-		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-		if !hasWrite {
-			return syscall.EACCES
-		}
-		customMetadata = dirMetadata
-		isDir = true
-		log.Println("Set metadata to dir metadata")
-	}
+    if !isDir {
+        log.Println("Dealing with a regfile!")
+        log.Println("Searching for custom metadata...")
+        err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
+        if err1 == fs.OK {
+            log.Println("Found custom metadata!")
+            log.Println("Checking permissions...")
+            hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
+            if !hasWrite {
+                return syscall.EACCES
+            }
+            log.Println("Allowed.")
+            customMetadata = nodeMetadata
+        }
+    } else {
+        log.Println("Dealing with a directory!")
+        log.Println("Searching for custom metadata...")
+        err2, dirMetadata := metadata.LookupDirMetadata(path)
+        if err2 == 0 {
+            log.Println("Found custom metadata!")
+            log.Println("Checking permissions...")
+            hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+            if !hasWrite {
+                log.Println("Not allowed.")
+                return syscall.EACCES
+            }
+            log.Println("Allowed.")
+            customMetadata = dirMetadata
+        }
+    }
 
-	return metadata.SetCustomXAttr(customMetadata, attr, data, flags, isDir)
+    log.Println("Setting XAttr in custom metadata...")
+    err3 := metadata.SetCustomXAttr(customMetadata, attr, data, flags, isDir)
+    log.Printf("Finished SETXATTR - {%v}\n", err3)
 
+	return err3
 }
 
 // Remove EXTENDED attribute
 func (n *OptiFSNode) Removexattr(ctx context.Context, attr string) syscall.Errno {
 
-	log.Println("ENTERED REMOVEXATTR")
+    path := n.RPath()
+	log.Printf("REMOVEXATTR performed for {%v}...\n", path)
 
 	// If we're dealing with the root, just return FS.OK
 	if &n.Inode == n.Root() {
+        log.Println("We're dealing with the ROOT directory, ignore and return OK")
 		return fs.OK
 	}
 
 	// Retrieve hash and refnums from persistent node
-	_, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+    log.Println("Looking in PERSISTENT store for hash and ref...")
+	err0, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+    if err0 != fs.OK {
+        log.Println("Persistent data doesn't exist, returnin ENODATA.")
+        return fs.ToErrno(syscall.ENODATA)
+    }
+    log.Printf("Found persistent data. {%v} - {%+v}\n", hash, ref)
 
 	// Custom metadata and flag to tell if we're dealing with directories or not
 	var customMetadata *metadata.MapEntryMetadata
-	var isDir bool
+    if !isDir {
+        log.Println("Dealing with a regfile!")
+        log.Println("Searching for custom metadata...")
+        // Check if the user has write access
+        err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
+        if err1 == fs.OK {
+            log.Println("Found custom metadata!")
+            log.Println("Checking permissions...")
+            hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
+            if !hasWrite {
+                log.Println("Not allowed.")
+                return syscall.EACCES
+            }
+            log.Println("Allowed.")
+            customMetadata = nodeMetadata
+        }
+    } else {
+        log.Println("Dealing with a directory!")
+        log.Println("Searching for custom metadata...")
+        err2, dirMetadata := metadata.LookupDirMetadata(path)
+        if err2 == 0 {
+            log.Println("Found custom metadata!")
+            log.Println("Checking permissions...")
+            hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
+            if !hasWrite {
+                log.Println("Not allowed.")
+                return syscall.EACCES
+            }
+            log.Println("Allowed.")
+            customMetadata = dirMetadata
+        }
+    }
 
-	// Check if the user has write access
-	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-	if err1 == fs.OK {
-		hasWrite := permissions.CheckPermissions(ctx, nodeMetadata, 1)
-		if !hasWrite {
-			return syscall.EACCES
-		}
-		customMetadata = nodeMetadata
-	}
-	path := n.RPath()
-	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == 0 {
-		hasWrite := permissions.CheckPermissions(ctx, dirMetadata, 1)
-		if !hasWrite {
-			return syscall.EACCES
-		}
-		customMetadata = dirMetadata
-		isDir = true
-	}
+    log.Println("Removing xattr in custom metadata...")
+    err3 := metadata.RemoveCustomXAttr(customMetadata, attr, isDir)
+    log.Printf("Finished REMOVEXATTR. {%v}\n", err3)
 
-	return metadata.RemoveCustomXAttr(customMetadata, attr, isDir)
+    return err3
 }
 
 // List EXTENDED attributes
 func (n *OptiFSNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
-	//log.Println("ENTERED LISTXATTR")
+
+    path := n.RPath()
+	log.Printf("REMOVEXATTR performed for {%v}...\n", path)
 
 	// If we're dealing with the root, just return FS.OK
 	if &n.Inode == n.Root() {
+        log.Println("We're dealing with the ROOT directory, ignore and return OK")
 		return 0, fs.OK
 	}
 
 	// Retrieve hash and refnums from persistent node
-	_, _, _, _, _, _, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
-
-	// Custom metadata and flag to tell if we're dealing with directories or not
-	var customMetadata *metadata.MapEntryMetadata
-	var isDir bool
+    log.Println("Looking in PERSISTENT store for hash and ref...")
+	err0, _, _, _, _, isDir, hash, ref := metadata.RetrieveNodeInfo(n.RPath())
+    if err0 != fs.OK {
+        log.Println("Persistent data doesn't exist, returnin ENODATA.")
+        return 0, fs.ToErrno(syscall.ENODATA)
+    }
+    log.Printf("Found persistent data. {%v} - {%+v}\n", hash, ref)
 
 	// Check if the user has read access
-	err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
-	if err1 == fs.OK {
-		hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
-		if !hasRead {
-			return 0, syscall.EACCES
-		}
-		customMetadata = nodeMetadata
-	}
-	path := n.RPath()
-	err2, dirMetadata := metadata.LookupDirMetadata(path)
-	if err2 == 0 {
-		hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
-		if !hasRead {
-			return 0, syscall.EACCES
-		}
-		customMetadata = dirMetadata
-		isDir = true
-	}
+	var customMetadata *metadata.MapEntryMetadata
+    if !isDir {
+        log.Println("Dealing with a regfile!")
+        log.Println("Searching for custom metadata...")
+        err1, nodeMetadata := metadata.LookupRegularFileMetadata(hash, ref)
+        if err1 == fs.OK {
+            log.Println("Found custom metadata!")
+            log.Println("Checking permissions...")
+            hasRead := permissions.CheckPermissions(ctx, nodeMetadata, 0)
+            if !hasRead {
+                log.Println("Not allowed.")
+                return 0, syscall.EACCES
+            }
+            log.Println("Allowed.")
+            customMetadata = nodeMetadata
+        }
+    } else {
+        log.Println("Dealing with a directory!")
+        log.Println("Searching for custom metadata...")
+        err2, dirMetadata := metadata.LookupDirMetadata(path)
+        if err2 == 0 {
+            log.Println("Found custom metadata!")
+            log.Println("Checking permissions...")
+            hasRead := permissions.CheckPermissions(ctx, dirMetadata, 0)
+            if !hasRead {
+                log.Println("Not allowed.")
+                return 0, syscall.EACCES
+            }
+            log.Println("Allowed.")
+            customMetadata = dirMetadata
+        }
+    }
 
 	// Pass it down to the filesystem below
+    log.Println("Listing xattr from custom metadata...")
 	allAttributesSize, err3 := metadata.ListCustomXAttr(customMetadata, &dest, isDir)
-	log.Println("Finished listing xattr")
+	log.Printf("Finished LISTXATTR. - {%v}\n", err3)
 	return uint32(allAttributesSize), fs.ToErrno(err3)
 }
 
@@ -666,7 +800,7 @@ func (n *OptiFSNode) Mkdir(ctx context.Context, name string, mode uint32, out *f
 	// check if the user is allowed to make a directory here
 	// i.e if we are in root, are they the sysadmin?
 	err := n.IsAllowed(ctx)
-	if err != nil {
+	if err != fs.OK {
 		return nil, fs.ToErrno(err)
 	}
 
@@ -749,16 +883,22 @@ func (n *OptiFSNode) setOwner(ctx context.Context, path string) error {
 
 // create a REGULAR FILE that doesn't exist, also fills in the gid/uid of the user into the file attributes
 func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (inode *fs.Inode, f fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+
+    path := n.RPath()
+    log.Printf("Performing CREATE for {%v} in {%v}...\n", name, path)
+
 	// check if the user is allowed to make a file here
 	// i.e if we are in root, are they the sysadmin?
 	err := n.IsAllowed(ctx)
-	if err != nil {
+	if err != fs.OK {
 		return nil, nil, 0, fs.ToErrno(err)
 	}
 
+    log.Println("Looking up parent directory custom metadata...")
 	// Check write and exec permissions on the parent directory
-	err1, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-	if err1 == 0 {
+	err1, dirMetadata := metadata.LookupDirMetadata(path)
+	if err1 == fs.OK {
+        log.Printf("Found - {%+v}\n", dirMetadata)
 		log.Println("Checking directory custom permissions")
 		writePerm := permissions.CheckPermissions(ctx, dirMetadata, 1) // Check for write permissions
 		if !writePerm {
@@ -770,14 +910,17 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 			log.Println("Not allowed - Exec!")
 			return nil, nil, 0, fs.ToErrno(syscall.EACCES)
 		}
+        log.Println("Allowed!")
 	}
 
-	filePath := filepath.Join(n.RPath(), name) // create the path for the new file
+	filePath := filepath.Join(path, name) // create the path for the new file
 
 	// try to open the file, OR create if theres no file to open
-	fdesc, err := syscall.Open(filePath, int(flags)|os.O_CREATE, mode)
+    log.Println("Performing OPEn with O_CREATE flag...")
+	fdesc, err2 := syscall.Open(filePath, int(flags)|os.O_CREATE, mode)
+    err2 = fs.ToErrno(err)
 
-	if err != nil {
+	if err2 != fs.OK {
 		return nil, nil, 0, fs.ToErrno(err)
 	}
 
@@ -791,8 +934,8 @@ func (n *OptiFSNode) Create(ctx context.Context, name string, flags uint32, mode
 
 	// stat the new file, making sure it was created
 	s := syscall.Stat_t{}
-	fErr := syscall.Fstat(fdesc, &s)
-	if fErr != nil {
+	err3 := syscall.Fstat(fdesc, &s)
+	if err3 != nil {
 		syscall.Close(fdesc) // close the file descr
 		return nil, nil, 0, fs.ToErrno(err)
 	}
@@ -813,7 +956,7 @@ func (n *OptiFSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	// check if the user is allowed to remove a file here
 	// i.e if we are in root, are they the sysadmin?
 	aErr := n.IsAllowed(ctx)
-	if aErr != nil {
+	if aErr != fs.OK {
 		return fs.ToErrno(aErr)
 	}
 
@@ -874,7 +1017,7 @@ func (n *OptiFSNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	// check if the user is allowed to remove a directory here
 	// i.e if we are in root, are they the sysadmin?
 	err := n.IsAllowed(ctx)
-	if err != nil {
+	if err != fs.OK {
 		return fs.ToErrno(err)
 	}
 
@@ -1336,7 +1479,7 @@ func (n *OptiFSNode) Rename(ctx context.Context, name string, newParent fs.Inode
 	// check if the user is allowed to rename a directory here (source and dest)
 	// i.e if either src/dest are in root, are they the sysadmin?
 	err := n.IsAllowedTwoLocations(ctx, newParent)
-	if err != nil {
+	if err != fs.OK {
 		return fs.ToErrno(err)
 	}
 
@@ -1503,7 +1646,7 @@ func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev ui
 	// check if the user is allowed to make a node here
 	// i.e if we are in root, are they the sysadmin?
 	err := n.IsAllowed(ctx)
-	if err != nil {
+	if err != fs.OK {
 		return nil, fs.ToErrno(err)
 	}
 
@@ -1553,7 +1696,7 @@ func (n *OptiFSNode) Link(ctx context.Context, target fs.InodeEmbedder, name str
 	// check if the user is allowed to link nodes here
 	// i.e if we are in root, are they the sysadmin?
 	err := n.IsAllowedTwoLocations(ctx, target)
-	if err != nil {
+	if err != fs.OK {
 		return nil, fs.ToErrno(err)
 	}
 

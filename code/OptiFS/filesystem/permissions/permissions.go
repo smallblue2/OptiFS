@@ -49,18 +49,19 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 func CheckPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, op uint8) bool {
 	err1, uid, gid := GetUIDGID(ctx)
 	if err1 != fs.OK {
+        log.Println("Failed to get UIDGID, exiting.")
 		return false
 	}
 
 	switch op {
 	case 0: // Read permission check
-		//log.Println("Checking read permissions")
+		log.Println("Checking read permissions")
 		return readCheck(uid, gid, nodeMetadata)
 	case 1:
-		//log.Println("Checking write permissions")
+		log.Println("Checking write permissions")
 		return writeCheck(uid, gid, nodeMetadata)
 	case 2:
-		//log.Println("Checking exec permissions")
+		log.Println("Checking exec permissions")
 		return execCheck(uid, gid, nodeMetadata)
 	default:
 		log.Printf("Unknown operation permission check requested (%v)\n", op)
@@ -84,17 +85,19 @@ func execCheck(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata) 
 }
 
 func checkMode(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata, ownerFlag uint32, groupFlag uint32, otherFlag uint32) bool {
+    log.Println("Extracting mode...")
 	mode := nodeMetadata.Mode
 
+    log.Println("Performing AND operation checks...")
 	switch {
 	case isOwner(uid, nodeMetadata.Uid):
-		//log.Println("User is the owner")
+		log.Println("User is the owner")
 		return mode&ownerFlag != 0
 	case isGroup(gid, nodeMetadata.Gid):
-		//log.Println("User is in the group")
+		log.Println("User is in the group")
 		return mode&groupFlag != 0
 	default:
-		//log.Println("User is considered other")
+		log.Println("User is considered other")
 		return mode&otherFlag != 0
 	}
 
