@@ -436,8 +436,8 @@ func (n *OptiFSNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
         } else {
             log.Println("Updating dir entry...")
             // Also check to see if we can find an entry in our directory hashmap
-            err2, dirMetadata := metadata.LookupDirMetadata(n.RPath())
-            if err2 == 0 {
+            err2, dirMetadata := metadata.LookupDirMetadata(path)
+            if err2 == fs.OK {
                 log.Println("Setting attributes for custom directory metadata.")
                 if f != nil {
                     return fs.ToErrno(SetAttributes(ctx, dirMetadata, in, n, f.(*OptiFSFile), out, isDir))

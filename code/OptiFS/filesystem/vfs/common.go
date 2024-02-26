@@ -53,8 +53,6 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 			}
 			// Try and modify our custom metadata system first
 			metadata.UpdateMode(customMetadata, &mode, isDir)
-            // Increment the gen when we enter SetAttr to signify a change
-            metadata.UpdateGenNumber(customMetadata, isDir)
 			log.Println("Set custom mode")
 			// Otherwise, just handle the underlying node
 		} else {
@@ -119,8 +117,6 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				saferGID = &tmp
 			}
 			metadata.UpdateOwner(customMetadata, saferUID, saferGID, isDir)
-            // Increment the gen when we enter SetAttr to signify a change
-            metadata.UpdateGenNumber(customMetadata, isDir)
 			log.Println("Set custom UID & GID")
 			// Otherwise, just update the underlying node instead
 		} else {
@@ -180,8 +176,6 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				return syscall.EACCES
 			}
 			metadata.UpdateTime(customMetadata, &times[0], &times[1], &times[2], isDir)
-            // Increment the gen when we enter SetAttr to signify a change
-            metadata.UpdateGenNumber(customMetadata, isDir)
 			log.Println("Set custom time")
 			// OTHERWISE update the underlying file
 		} else {
@@ -217,8 +211,6 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 			}
 			tmp := int64(size)
 			metadata.UpdateSize(customMetadata, &tmp, isDir)
-            // Increment the gen when we enter SetAttr to signify a change
-            metadata.UpdateGenNumber(customMetadata, isDir)
 			log.Println("Updated custom size")
 		} else {
 			if n != nil { // Update the underlying node if available
@@ -310,7 +302,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 	// TRY AND FIND CUSTOM NODE
 	ferr, sIno, sMode, sGen, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
     // If we got an error (it doesn't exist) OR we have an uninitialised node (ref == 0, hash == [000...000])
-	if ferr != fs.OK || (existingRef == 0 && existingHash == [64]byte{}) { // If custom node doesn't exist, create a new one
+	if ferr != fs.OK || ((existingRef == 0 && existingHash == [64]byte{}) && !isDir) { // If custom node doesn't exist, create a new one
 
 		log.Println("Persistent node entry doesn't exist")
 
