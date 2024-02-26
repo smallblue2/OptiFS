@@ -340,7 +340,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 		existingHash = hash
 		existingRef = ref
 
-        if isDir {
+        if !isDir {
             log.Println("Looking up regfile custom metadata...")
             // Try and get an entry in our own custom system
             err1, fileMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
@@ -1446,6 +1446,7 @@ func (n *OptiFSNode) Release(ctx context.Context, f fs.FileHandle) syscall.Errno
 					// TODO: figure out how to atomically revert from here or implement some kind of metadata
 				}
 				log.Println("Succesfully created metadata for new file that was duplicate")
+                log.Printf("{%+v}\n", fileMetadata)
 			}
 
 			log.Println("Finished de-duplicating file!")
