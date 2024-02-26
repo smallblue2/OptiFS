@@ -37,6 +37,11 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 		}
 	}
 
+	// sysadmin is always allowed
+	if IsUserSysadmin() {
+		isAllowed = true
+	}
+
 	log.Printf("Is allowed -> {%v}\n", isAllowed)
 	return isAllowed
 }
@@ -49,7 +54,7 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 func CheckPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, op uint8) bool {
 	err1, uid, gid := GetUIDGID(ctx)
 	if err1 != fs.OK {
-        log.Println("Failed to get UIDGID, exiting.")
+		log.Println("Failed to get UIDGID, exiting.")
 		return false
 	}
 
@@ -85,10 +90,15 @@ func execCheck(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata) 
 }
 
 func checkMode(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata, ownerFlag uint32, groupFlag uint32, otherFlag uint32) bool {
-    log.Println("Extracting mode...")
+	log.Println("Extracting mode...")
 	mode := nodeMetadata.Mode
 
-    log.Println("Performing AND operation checks...")
+	// sysadmin is always allowed
+	if IsUserSysadmin() {
+		return true
+	}
+
+	log.Println("Performing AND operation checks...")
 	switch {
 	case isOwner(uid, nodeMetadata.Uid):
 		log.Println("User is the owner")
@@ -200,6 +210,11 @@ func CheckMask(ctx context.Context, mask uint32, nodeMetadata *metadata.MapEntry
 		// shift mode 6 bits to the left to line up other permission bits to be under where user bits usually are
 		allowed = checkPermissionBits(mask, mode<<6)
 		log.Printf("Other member requested %v, allowed: %v\n", mask, allowed)
+	}
+
+	// sysadmin is always allowed
+	if IsUserSysadmin() {
+		allowed = true
 	}
 
 	if !allowed {
