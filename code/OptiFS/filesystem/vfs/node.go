@@ -330,7 +330,6 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	path := n.RPath()
 	log.Printf("GETATTR performed for {%v}...\n", path)
 
-
 	// Not sure if attributes carry over node Lookups, check persistent storage to be sure
     log.Println("Searching for hash and ref IN PERSISTENT STORE...")
 	var existingHash [64]byte
@@ -339,6 +338,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
         log.Println("Found!")
 		existingHash = hash
 		existingRef = ref
+        log.Printf("{%v} - {%+v}\n", existingHash, existingRef)
 
         if !isDir {
             log.Println("Looking up regfile custom metadata...")

@@ -335,7 +335,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 		// Check if the lookup is for a directory or not
 		stable := x.StableAttr()
-		if s.Mode&syscall.S_IFMT == syscall.S_IFDIR {
+		if isDir {
 			// Store the persistent data
 			metadata.StoreDirInfo(nodePath, &stable, s.Mode)
 			log.Println("STORED DIRECTORY PERSISTENT DATA")
