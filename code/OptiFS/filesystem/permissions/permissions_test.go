@@ -678,7 +678,7 @@ func TestCheckMask(t *testing.T) {
 		},
 		{
 			name:         "Sysadmin Bypass",
-			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
+			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: uintUID(getValidUID()), Gid: uintGID(getValidGID())}, Pid: 123}),
 			mask:         2,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1210, Gid: 2875, Mode: 0b111101100},
 			currentSysadmin: Sysadmin{
