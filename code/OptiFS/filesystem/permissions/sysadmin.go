@@ -1,6 +1,7 @@
 package permissions
 
 import (
+	"context"
 	"encoding/gob"
 	"log"
 	"os"
@@ -107,31 +108,46 @@ func SetSysadmin() syscall.Errno {
 }
 
 // checks if the user is the sysadmin of the system, or is in the same sysadmin group
-func IsUserSysadmin() bool {
-	user, err := user.Current() // get the current user
-	if err != nil {
-		log.Fatalf("Couldn't get UID of user: %v\n", err)
-	}
+func IsUserSysadmin(ctx *context.Context) bool {
 
-	// extract userID
-	userUID, conversionErr := strconv.Atoi(user.Uid)
-	if conversionErr != nil {
-		log.Fatalf("Couldn't get sysadmin UID!: %v\n", conversionErr)
-	}
+	// if we have a context to get it from
+	if ctx != nil {
+		ctxErr, uid, gid := GetUIDGID(*ctx)
+		log.Printf("Extracted from context: UID: %v GID: %v\n", uid, gid)
+		if ctxErr != fs.OK {
+			log.Fatalf("Couldn't get sysadmin UID from context!: %v\n", ctxErr)
+		}
+		if uid == SysAdmin.UID || gid == SysAdmin.GID {
+			log.Printf("Current Sysadmin: %+v\nYou are: %v, %v\n", SysAdmin, uid, gid)
+			return true
+		}
+	} else {
+		// if there is no context (starting up system, etc.)
+		user, err := user.Current() // get the current user
+		if err != nil {
+			log.Fatalf("Couldn't get UID of user: %v\n", err)
+		}
 
-	// extract groupID
-	userGID, gidConversionErr := strconv.Atoi(user.Gid) // get the GID
-	if gidConversionErr != nil {
-		log.Fatalf("Couldn't get sysadmin GID!: %v\n", gidConversionErr)
-	}
+		// extract userID
+		userUID, conversionErr := strconv.Atoi(user.Uid)
+		if conversionErr != nil {
+			log.Fatalf("Couldn't get sysadmin UID!: %v\n", conversionErr)
+		}
 
-	// if they have the same UID or are in the same group (sysadmin group)
-	if uint32(userUID) == SysAdmin.UID || uint32(userGID) == SysAdmin.GID {
-		log.Printf("Current Sysadmin: %+v\nYou are: %v, %v\n", SysAdmin, userUID, userGID)
-		return true
-	}
+		// extract groupID
+		userGID, gidConversionErr := strconv.Atoi(user.Gid) // get the GID
+		if gidConversionErr != nil {
+			log.Fatalf("Couldn't get sysadmin GID!: %v\n", gidConversionErr)
+		}
 
-	log.Printf("Current Sysadmin: %+v\nYou are: %v, %v\n", SysAdmin, userUID, userGID)
+		// if they have the same UID or are in the same group (sysadmin group)
+		if uint32(userUID) == SysAdmin.UID || uint32(userGID) == SysAdmin.GID {
+			log.Printf("Current Sysadmin: %+v\nYou are: %v, %v\n", SysAdmin, userUID, userGID)
+			return true
+		}
+
+		return false
+	}
 
 	return false
 }

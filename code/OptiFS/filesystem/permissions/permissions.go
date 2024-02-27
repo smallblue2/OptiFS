@@ -38,7 +38,7 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 	}
 
 	// sysadmin is always allowed
-	if IsUserSysadmin() {
+	if IsUserSysadmin(&ctx) {
 		isAllowed = true
 	}
 
@@ -52,6 +52,12 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 // WRITE -> op = 1
 // EXEC -> op = 2
 func CheckPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, op uint8) bool {
+
+	// sysadmin is always allowed
+	if IsUserSysadmin(&ctx) {
+		return true
+	}
+
 	err1, uid, gid := GetUIDGID(ctx)
 	if err1 != fs.OK {
 		log.Println("Failed to get UIDGID, exiting.")
@@ -92,11 +98,6 @@ func execCheck(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata) 
 func checkMode(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata, ownerFlag uint32, groupFlag uint32, otherFlag uint32) bool {
 	log.Println("Extracting mode...")
 	mode := nodeMetadata.Mode
-
-	// sysadmin is always allowed
-	if IsUserSysadmin() {
-		return true
-	}
 
 	log.Println("Performing AND operation checks...")
 	switch {
@@ -179,6 +180,10 @@ func GetUIDGID(ctx context.Context) (syscall.Errno, uint32, uint32) {
 
 // Checks a mask against nodeMetadata mode
 func CheckMask(ctx context.Context, mask uint32, nodeMetadata *metadata.MapEntryMetadata) bool {
+	// Allows the sysadmin to ignore permission checks
+	if IsUserSysadmin(&ctx) {
+		return true
+	}
 
 	// Extract the UID and GID from the context
 	err1, currentUID, currentGID := GetUIDGID(ctx)
@@ -213,9 +218,6 @@ func CheckMask(ctx context.Context, mask uint32, nodeMetadata *metadata.MapEntry
 	}
 
 	// sysadmin is always allowed
-	if IsUserSysadmin() {
-		allowed = true
-	}
 
 	if !allowed {
 		log.Println("NOT ALLOWED")
