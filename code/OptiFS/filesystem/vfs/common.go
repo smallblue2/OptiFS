@@ -303,8 +303,8 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 	ferr, sIno, sMode, sGen, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
     // If we got an error (it doesn't exist) OR we have an uninitialised node (ref == 0, hash == [000...000])
 	if ferr != fs.OK || ((existingRef == 0 && existingHash == [64]byte{}) && !isDir) { // If custom node doesn't exist, create a new one
-
 		log.Println("Persistent node entry doesn't exist")
+        log.Println("BRAND NEW VIRTUAL NODE BEING CREATED")
 
 		log.Printf("Mode: 0x%X\n", s.Mode)
 
@@ -324,18 +324,11 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 		// Fill the output attributes from out stat struct
 		out.Attr.FromStat(s)
-        // Hopefully forcing no caching
-        //out.EntryValid = 0
-        //out.EntryValidNsec = 0
-        //out.AttrValidNsec = 0
-        //out.AttrValidNsec = 0
-        out.SetEntryTimeout(0)
-        out.SetAttrTimeout(0)
 		log.Println("Filled out from stat")
 
 		// Check if the lookup is for a directory or not
 		stable := x.StableAttr()
-		if isDir {
+		if !isDir {
 			// Store the persistent data
 			metadata.StoreDirInfo(nodePath, &stable, s.Mode)
 			log.Println("STORED DIRECTORY PERSISTENT DATA")
