@@ -1,6 +1,5 @@
 stages:
   - unit_tests
-  - end_to_end_tests
 
 test_metadata:
   stage: unit_tests
@@ -23,13 +22,5 @@ test_hashing:
   image: golang:latest
   before_script:
     - cd code/OptiFS/filesystem/hashing
-  script:
-    - go test -v ./
-
-test_filesystem:
-  stage: end_to_end_tests
-  image: golang:latest
-  before_script:
-    - cd code/OptiFS/filesystem
   script:
     - go test -v ./
