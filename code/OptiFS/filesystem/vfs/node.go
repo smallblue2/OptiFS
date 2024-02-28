@@ -234,6 +234,7 @@ func (n *OptiFSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	log.Printf("LOOKUP performed for {%v} from node {%v}...\n", name, path)
 
 	// Check execute permissions on the parent directory
+    log.Println("Looking for parent directory custom metadata...")
 	err1, dirMetadata := metadata.LookupDirMetadata(path)
 	if err1 == 0 {
 		log.Println("Checking permissions of parent directory...")
@@ -338,7 +339,7 @@ func (n *OptiFSNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
         log.Println("Found!")
 		existingHash = hash
 		existingRef = ref
-        log.Printf("{%v} - {%+v}\n", existingHash, existingRef)
+        log.Printf("{%v} - {%v} - {%+v}\n", isDir, existingHash, existingRef)
 
         if !isDir {
             log.Println("Looking up regfile custom metadata...")

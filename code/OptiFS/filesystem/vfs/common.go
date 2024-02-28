@@ -301,8 +301,8 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 	// TRY AND FIND CUSTOM NODE
 	ferr, sIno, sMode, sGen, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
-    // If we got an error (it doesn't exist) OR we have an uninitialised node (ref == 0, hash == [000...000])
-	if ferr != fs.OK || ((existingRef == 0 && existingHash == [64]byte{}) && !isDir) { // If custom node doesn't exist, create a new one
+    // If we got an error (it doesn't exist) OR we have an uninitialised node (ref == 0, hash == [000...000] that isn't a directory)
+	if ferr != fs.OK || ((existingRef == 0 && existingHash == [64]byte{}) && s.Mode&syscall.S_IFMT != syscall.S_IFDIR) { // If custom node doesn't exist, create a new one
 		log.Println("Persistent node entry doesn't exist")
         log.Println("BRAND NEW VIRTUAL NODE BEING CREATED")
 
@@ -328,7 +328,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 		// Check if the lookup is for a directory or not
 		stable := x.StableAttr()
-		if !isDir {
+		if s.Mode&syscall.S_IFMT == syscall.S_IFDIR {
 			// Store the persistent data
 			metadata.StoreDirInfo(nodePath, &stable, s.Mode)
 			log.Println("STORED DIRECTORY PERSISTENT DATA")
@@ -358,7 +358,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 	var nd fs.InodeEmbedder
 	// Create a node with the existing attributes we found
 	if !isDir {
-		log.Println("IS a regular file!")
+		log.Println("IS A REGULAR FILE!")
 
 		nd = n.RootNode.existingNode(existingHash, existingRef)
 		log.Println("Created existing InodeEmbedder!")
@@ -371,8 +371,6 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		}
 
 		metadata.FillAttr(customMetadata, &out.Attr)
-        out.SetEntryTimeout(0)
-        out.SetAttrTimeout(0)
 		log.Println("Filled out attributes with custom metadata!")
 
 		if fdesc != nil && flags != nil {
@@ -384,7 +382,7 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		return fs.OK, x, fh
 
 	} else {
-		log.Println("IS a directory!")
+		log.Println("IS A DIRECTORY!")
 
 		nd = n.RootNode.newNode(n.EmbeddedInode(), name, s)
 		log.Println("Created new InodeEmbedder!")
@@ -395,8 +393,6 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 			return fs.ToErrno(syscall.ENODATA), nil, nil
 		}
 		metadata.FillAttr(customMetadata, &out.Attr)
-        out.SetEntryTimeout(0)
-        out.SetAttrTimeout(0)
 		log.Println("Filled out attributes with custom metadata!")
 
 		x := n.NewInode(ctx, nd, *stable)
