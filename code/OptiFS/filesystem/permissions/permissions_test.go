@@ -179,10 +179,10 @@ func TestCheckMode(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:         "Sysadmin Bypass",
+			name:         "Sysadmin Bypass - Fails",
 			uid:          1000,
 			gid:          1000,
-			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1320, Gid: 1000, Mode: 0b111101001},
+			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1320, Gid: 1320, Mode: 0b111101001},
 			ownerFlag:    0,
 			groupFlag:    0b000000100, // group read
 			otherFlag:    0,
@@ -191,7 +191,7 @@ func TestCheckMode(t *testing.T) {
 				GID: uintGID(getValidGID()),
 				Set: true,
 			},
-			expected: true,
+			expected: false,
 		},
 	}
 
@@ -240,7 +240,7 @@ func TestReadCheck(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:         "Sysadmin Bypass",
+			name:         "Sysadmin Bypass - Impossible",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b011101101},
@@ -249,7 +249,7 @@ func TestReadCheck(t *testing.T) {
 				GID: uintGID(getValidGID()),
 				Set: true,
 			},
-			expected: true,
+			expected: false,
 		},
 	}
 	for _, tc := range testCases {
@@ -297,7 +297,7 @@ func TestWriteCheck(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:         "Sysadmin Bypass",
+			name:         "Sysadmin Bypass - Impossible",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b101101101},
@@ -306,7 +306,7 @@ func TestWriteCheck(t *testing.T) {
 				GID: uintGID(getValidGID()),
 				Set: true,
 			},
-			expected: true,
+			expected: false,
 		},
 	}
 	for _, tc := range testCases {
@@ -355,7 +355,7 @@ func TestExecCheck(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:         "Sysadmin Bypass",
+			name:         "Sysadmin Bypass - Impossible",
 			uid:          1000,
 			gid:          1000,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1000, Gid: 1238, Mode: 0b110101101},
@@ -364,7 +364,7 @@ func TestExecCheck(t *testing.T) {
 				GID: uintGID(getValidGID()),
 				Set: true,
 			},
-			expected: true,
+			expected: false,
 		},
 	}
 	for _, tc := range testCases {
@@ -678,7 +678,7 @@ func TestCheckMask(t *testing.T) {
 		},
 		{
 			name:         "Sysadmin Bypass",
-			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: 1000, Gid: 1000}, Pid: 123}),
+			ctx:          fuse.NewContext(&fuse.Context{}, &fuse.Caller{Owner: fuse.Owner{Uid: uintUID(getValidUID()), Gid: uintGID(getValidGID())}, Pid: 123}),
 			mask:         2,
 			nodeMetadata: &metadata.MapEntryMetadata{Uid: 1210, Gid: 2875, Mode: 0b111101100},
 			currentSysadmin: Sysadmin{

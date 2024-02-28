@@ -73,20 +73,20 @@ func main() {
 	// if there is no sysadmin, set the current user as the sysadmin
 	if !permissions.SysAdmin.Set {
 		permissions.SetSysadmin()
-	} else if !permissions.IsUserSysadmin() {
+	} else if !permissions.IsUserSysadmin(nil) {
 		log.Fatal("You cannot run this OptiFS instance: not a sysadmin.")
 	}
 
 	// The user wishes to change the sysadmin UID/GID
 	if *changeSysadminUID != "" {
-		if permissions.IsUserSysadmin() {
+		if permissions.IsUserSysadmin(nil) {
 			permissions.ChangeSysadminUID(*changeSysadminUID)
 			permissions.SaveSysadmin(dest) // save the changes
 			return
 		}
 	}
 	if *changeSysadminGID != "" {
-		if permissions.IsUserSysadmin() {
+		if permissions.IsUserSysadmin(nil) {
 			permissions.ChangeSysadminGID(*changeSysadminGID)
 			permissions.SaveSysadmin(dest) // save the changes
 			return
