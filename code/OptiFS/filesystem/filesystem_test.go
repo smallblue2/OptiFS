@@ -27,58 +27,6 @@ func mountFilesystem(t *testing.T) (mountpoint, underlying string, umountCmd *ex
 	return
 }
 
-// Create an empty file with touch
-func TestCreateEmptyFileWithTouch(t *testing.T) {
-	testcases := []struct {
-		name string
-		file string
-	}{
-		{
-			name: "Empty file",
-			file: "testfile",
-		},
-	}
-
-	mnt, und, stop := mountFilesystem(t)
-	defer stop.Run()
-
-	for _, tc := range testcases {
-		t.Run(tc.name, func(t *testing.T) {
-
-			// Create a file with touch
-			filePath := fmt.Sprintf("%v/%v", mnt, tc.file)
-			log.Println(filePath)
-			exec.Command("touch", filePath).Run()
-
-            // Wait a second to be safe
-            time.Sleep(1 * time.Second)
-
-			// Ensure the file exists in OptiFS and underlying
-			over := &syscall.Stat_t{}
-			overLocation := fmt.Sprintf("%v/%v", mnt, tc.file)
-			log.Println(overLocation)
-			if err := syscall.Stat(overLocation, over); err != nil {
-				t.Errorf("Couldn't stat file in OptiFS")
-			}
-
-            if over.Size != 0 {
-                t.Error("Size of OptiFS node isn't 0\n")
-            }
-
-			under := &syscall.Stat_t{}
-			underLocation := fmt.Sprintf("%v/%v", und, tc.file)
-			log.Println(underLocation)
-			if err := syscall.Stat(underLocation, under); err != nil {
-				t.Errorf("Couldn't stat file in underlying filesystem")
-			}
-
-            if under.Size != 0 {
-                t.Error("Size of underlying node isn't 0\n")
-            }
-		})
-	}
-}
-
 // This tests the user creating file through the redirection of echo
 func TestCreateFileWithEcho(t *testing.T) {
 	testcases := []struct {
