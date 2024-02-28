@@ -1759,102 +1759,102 @@ func TestMigrateRegularFileMetadata(t *testing.T) {
 		expectedError     syscall.Errno
 	}{
 		{
-            name: "Succesful update",
-            inputOldMetadata: &MapEntryMetadata{
-                Path: "old/path",
-                Mode: 9430,
-                Dev: 5,
-                Gen: 2,
-                Ino: 823740,
-                Uid: 1000,
-                Gid: 1000,
-                Rdev: 12,
-                Size: 24353,
-                Blocks: 44,
-                Blksize: 4096,
-                XAttr: map[string][]byte{
-                    "old": []byte("data"),
-                },
-                Nlink: 1,
-                Atim: syscall.Timespec{Sec: 12, Nsec: 43},
-                Mtim: syscall.Timespec{Sec: 12, Nsec: 43},
-                Ctim: syscall.Timespec{Sec: 2, Nsec: 3},
-                X__pad0: 99,
-                X__unused: [3]int64{0, 0, 0},
-            },
-            inputNewMetadata: &MapEntryMetadata{
-                Path: "new/path",
-                Mode: 349,
-                Dev: 5,
-                Gen: 3,
-                Ino: 823740,
-                Uid: 1000,
-                Gid: 1000,
-                Rdev: 12,
-                Size: 32454,
-                Blocks: 48,
-                Blksize: 4096,
-                XAttr: map[string][]byte{},
-                Nlink: 1,
-                Atim: syscall.Timespec{Sec: 16, Nsec: 49},
-                Mtim: syscall.Timespec{Sec: 16, Nsec: 49},
-                Ctim: syscall.Timespec{Sec: 2, Nsec: 3},
-                X__pad0: 99,
-                X__unused: [3]int64{0, 0, 0},
-            },
-            inputUnstableAttr: &syscall.Stat_t{
-                Dev: 21,
-                Ino: 12435,
-                Atim: syscall.Timespec{Sec: 22, Nsec: 32},
-                Mtim: syscall.Timespec{Sec: 22, Nsec: 32},
-                Ctim: syscall.Timespec{Sec: 12, Nsec: 32},
-                Nlink: 3,
-                Uid: 123,
-                Gid: 123,
-                Mode: 534,
-                Blksize: 3243,
-                Blocks: 23,
-                Size: 5432,
-                Rdev: 1,
-                X__unused: [3]int64{1,2,3},
-                X__pad0: 32,
-            },
-            expectedError: fs.OK,
-            expectedReturn: &MapEntryMetadata{
-                Path: "old/path",
-                Gen: 2,
-                Mode: 9430,
-                Ctim: syscall.Timespec{Sec: 2, Nsec: 3},
-                Uid: 1000,
-                Gid: 1000,
-                Dev: 5,
-                Ino: 823740,
-                XAttr: map[string][]byte{
-                    "old": []byte("data"),
-                },
-                Atim: syscall.Timespec{Sec: 22, Nsec: 32},
-                Mtim: syscall.Timespec{Sec: 22, Nsec: 32},
-                Rdev: 1,
-                Nlink: 3,
-                Size: 5432,
-                Blksize: 3243,
-                Blocks: 23,
-                X__unused: [3]int64{1,2,3},
-                X__pad0: 32,
-            },
-        },
+			name: "Succesful update",
+			inputOldMetadata: &MapEntryMetadata{
+				Path:    "old/path",
+				Mode:    9430,
+				Dev:     5,
+				Gen:     2,
+				Ino:     823740,
+				Uid:     1000,
+				Gid:     1000,
+				Rdev:    12,
+				Size:    24353,
+				Blocks:  44,
+				Blksize: 4096,
+				XAttr: map[string][]byte{
+					"old": []byte("data"),
+				},
+				Nlink:     1,
+				Atim:      syscall.Timespec{Sec: 12, Nsec: 43},
+				Mtim:      syscall.Timespec{Sec: 12, Nsec: 43},
+				Ctim:      syscall.Timespec{Sec: 2, Nsec: 3},
+				X__pad0:   99,
+				X__unused: [3]int64{0, 0, 0},
+			},
+			inputNewMetadata: &MapEntryMetadata{
+				Path:      "new/path",
+				Mode:      349,
+				Dev:       5,
+				Gen:       3,
+				Ino:       823740,
+				Uid:       1000,
+				Gid:       1000,
+				Rdev:      12,
+				Size:      32454,
+				Blocks:    48,
+				Blksize:   4096,
+				XAttr:     map[string][]byte{},
+				Nlink:     1,
+				Atim:      syscall.Timespec{Sec: 16, Nsec: 49},
+				Mtim:      syscall.Timespec{Sec: 16, Nsec: 49},
+				Ctim:      syscall.Timespec{Sec: 2, Nsec: 3},
+				X__pad0:   99,
+				X__unused: [3]int64{0, 0, 0},
+			},
+			inputUnstableAttr: &syscall.Stat_t{
+				Dev:       21,
+				Ino:       12435,
+				Atim:      syscall.Timespec{Sec: 22, Nsec: 32},
+				Mtim:      syscall.Timespec{Sec: 22, Nsec: 32},
+				Ctim:      syscall.Timespec{Sec: 12, Nsec: 32},
+				Nlink:     3,
+				Uid:       123,
+				Gid:       123,
+				Mode:      534,
+				Blksize:   3243,
+				Blocks:    23,
+				Size:      5432,
+				Rdev:      1,
+				X__unused: [3]int64{1, 2, 3},
+				X__pad0:   32,
+			},
+			expectedError: fs.OK,
+			expectedReturn: &MapEntryMetadata{
+				Path: "old/path",
+				Gen:  2,
+				Mode: 9430,
+				Ctim: syscall.Timespec{Sec: 2, Nsec: 3},
+				Uid:  1000,
+				Gid:  1000,
+				Dev:  5,
+				Ino:  823740,
+				XAttr: map[string][]byte{
+					"old": []byte("data"),
+				},
+				Atim:      syscall.Timespec{Sec: 22, Nsec: 32},
+				Mtim:      syscall.Timespec{Sec: 22, Nsec: 32},
+				Rdev:      1,
+				Nlink:     3,
+				Size:      5432,
+				Blksize:   3243,
+				Blocks:    23,
+				X__unused: [3]int64{1, 2, 3},
+				X__pad0:   32,
+			},
+		},
 	}
 
-    for _, tc := range testcases {
-        t.Run(tc.name, func(t *testing.T) {
-            err := MigrateRegularFileMetadata(tc.inputOldMetadata, tc.inputNewMetadata, tc.inputUnstableAttr)
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := MigrateRegularFileMetadata(tc.inputOldMetadata, tc.inputNewMetadata, tc.inputUnstableAttr)
 
-            if err != tc.expectedError {
-                t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
-            }
-            if !reflect.DeepEqual(tc.inputNewMetadata, tc.expectedReturn) {
-                t.Errorf("Expected %v, got %v\n", tc.expectedReturn, tc.inputNewMetadata)
-            }
-        })
-    }
+			if err != tc.expectedError {
+				t.Errorf("Expected %v, got %v\n", tc.expectedError, err)
+			}
+			if !reflect.DeepEqual(tc.inputNewMetadata, tc.expectedReturn) {
+				t.Errorf("Expected %v, got %v\n", tc.expectedReturn, tc.inputNewMetadata)
+			}
+		})
+	}
 }

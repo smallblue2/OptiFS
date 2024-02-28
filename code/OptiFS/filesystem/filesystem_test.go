@@ -1,9 +1,7 @@
 package filesystem
 
 import (
-	"bytes"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,16 +29,13 @@ func mountFilesystem(t *testing.T) (mntPath, undPath string, cleanup func ()) {
     if err3 != nil {
         t.Fatalf("Failed to get mountpoint dir abs path")
     }
-    log.Println(mntPath)
     undPath, err4 := filepath.Abs("underlying")
     if err4 != nil {
         t.Fatalf("Failed to get underlying dir abs path")
     }
-    log.Println(undPath)
 
 	// Start the filesystem
     cmd := exec.Command("filesystem", "-rm-persistence", mntPath, undPath)
-    log.Println("Mounting: ", cmd.String())
     cmd.Start()
 
 	// Wait a second to be safe
@@ -99,7 +94,6 @@ func TestCreateFileWithEcho(t *testing.T) {
 			cmd := exec.Command("echo", "-n", fmt.Sprintf("%v", tc.content))
 			// Redirect stdout
 			cmd.Stdout = file
-			log.Printf("Command: %v\n", cmd.String())
 			cmd.Run()
 
 			// Ensure the file exists in OptiFS
@@ -174,13 +168,11 @@ func TestCreateDuplicateFilesWithEcho(t *testing.T) {
 			// Fill files with Echo
 			cmd1 := exec.Command("echo", "-n", fmt.Sprintf("%v", tc.content1))
 			cmd1.Stdout = fileWrite1
-			log.Printf("Command: %v\n", cmd1.String())
 			cmd1.Run()
 			fileWrite1.Close()
 
 			cmd2 := exec.Command("echo", "-n", fmt.Sprintf("%v", tc.content2))
 			cmd2.Stdout = fileWrite2
-			log.Printf("Command: %v\n", cmd2.String())
 			cmd2.Run()
 			fileWrite2.Close()
 
@@ -239,18 +231,4 @@ func TestCreateDuplicateFilesWithEcho(t *testing.T) {
 			}
 		})
 	}
-
-    var out1 bytes.Buffer
-    var out2 bytes.Buffer
-	lsCmdMount := exec.Command("ls", mnt)
-    lsCmdMount.Stdout = &out1
-	lsCmdMount.Run()
-	log.Println(lsCmdMount.String())
-    log.Printf("OptiFS:\n%v\n", out1.String())
-
-	lsCmdund := exec.Command("ls", und)
-    lsCmdund.Stdout = &out2
-	lsCmdund.Run()
-	log.Println(lsCmdund.String())
-    log.Printf("Underlying:\n%v\n", out2.String())
 }

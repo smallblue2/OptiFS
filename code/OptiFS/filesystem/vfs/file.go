@@ -27,14 +27,14 @@ type OptiFSFile struct {
 	// store the hash of the file content
 	currentHash [64]byte
 
-    // Reference number in our memory
-    refNum uint64
+	// Reference number in our memory
+	refNum uint64
 
 	// Stable attributes of the file
 	attr fs.StableAttr
 
-    // The flags of the file (OAPPEND, RWONLY, etc...)
-    flags uint32
+	// The flags of the file (OAPPEND, RWONLY, etc...)
+	flags uint32
 }
 
 // statuses used commonly throughout the system, to do with locks
@@ -46,39 +46,39 @@ const (
 
 // Interfaces for Filehandles
 var _ = (fs.FileHandle)((*OptiFSFile)(nil))
-var _ = (fs.FileReader)((*OptiFSFile)(nil))    // reading a file
-var _ = (fs.FileFsyncer)((*OptiFSFile)(nil))   // Ensuring things are written to disk
-var _ = (fs.FileFlusher)((*OptiFSFile)(nil))   // Flushes the file
-var _ = (fs.FileReleaser)((*OptiFSFile)(nil))  // release (close) a file
-var _ = (fs.FileGetlker)((*OptiFSFile)(nil))   // find conflicting locks for given lock
-var _ = (fs.FileSetlker)((*OptiFSFile)(nil))   // gets a lock on a file
-var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil))  // gets a lock on a file, waits for it to be ready
+var _ = (fs.FileReader)((*OptiFSFile)(nil))   // reading a file
+var _ = (fs.FileFsyncer)((*OptiFSFile)(nil))  // Ensuring things are written to disk
+var _ = (fs.FileFlusher)((*OptiFSFile)(nil))  // Flushes the file
+var _ = (fs.FileReleaser)((*OptiFSFile)(nil)) // release (close) a file
+var _ = (fs.FileGetlker)((*OptiFSFile)(nil))  // find conflicting locks for given lock
+var _ = (fs.FileSetlker)((*OptiFSFile)(nil))  // gets a lock on a file
+var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil)) // gets a lock on a file, waits for it to be ready
 
 // makes a filehandle, to give more control over operations on files in the system
 // abstract reference to files, where the state of the file (open, offsets, reading etc)
 // can be tracked
 func NewOptiFSFile(fdesc int, attr fs.StableAttr, flags uint32, currentHash [64]byte, refNum uint64) *OptiFSFile {
 	//log.Println("NEW OPTIFSFILE CREATED")
-    return &OptiFSFile{fdesc: fdesc, attr: attr, flags: flags, currentHash: currentHash, refNum: refNum}
+	return &OptiFSFile{fdesc: fdesc, attr: attr, flags: flags, currentHash: currentHash, refNum: refNum}
 }
 
 // handles read operations (implements concurrency)
 func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.ReadResult, syscall.Errno) {
 
-    log.Println("Reading file")
+	log.Println("Reading file")
 
-    log.Println("Checking for custom permissions")
-    // Check permissions of custom metadata (if available)
-    herr, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
-    if herr == fs.OK {
-        log.Println("Custom permissions found!")
-        allowed := permissions.CheckPermissions(ctx, fileMetadata, 0) // Check read perm
-        if !allowed {
-            log.Println("User isn't allowed to read file handle!")
-            return nil, syscall.EACCES
-        }
-        log.Println("User is allowed to read file handle")
-    }
+	log.Println("Checking for custom permissions")
+	// Check permissions of custom metadata (if available)
+	herr, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
+	if herr == fs.OK {
+		log.Println("Custom permissions found!")
+		allowed := permissions.CheckPermissions(ctx, fileMetadata, 0) // Check read perm
+		if !allowed {
+			log.Println("User isn't allowed to read file handle!")
+			return nil, syscall.EACCES
+		}
+		log.Println("User is allowed to read file handle")
+	}
 
 	// lock the operation, and make sure it doesnt unlock until function is exited
 	// unlocks when function is exited
@@ -89,11 +89,11 @@ func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.
 	// Use the FUSE library's built-in
 	read := fuse.ReadResultFd(uintptr(f.fdesc), offset, len(dest))
 
-    // Update file's atime
-    if herr == fs.OK {
-        now := time.Now()
-        metadata.UpdateTime(fileMetadata, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, nil, nil, false)
-    }
+	// Update file's atime
+	if herr == fs.OK {
+		now := time.Now()
+		metadata.UpdateTime(fileMetadata, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, nil, nil, false)
+	}
 
 	return read, fs.OK
 }
@@ -114,8 +114,8 @@ func (f *OptiFSFile) Flush(ctx context.Context) syscall.Errno {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// In order to force FUSE to flush without losing the file descriptor, 
-    // we will dup the filedescriptor and then close it
+	// In order to force FUSE to flush without losing the file descriptor,
+	// we will dup the filedescriptor and then close it
 	tmpfd, err := syscall.Dup(f.fdesc)
 	if err != nil {
 		return fs.ToErrno(err)

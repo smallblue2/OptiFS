@@ -32,7 +32,7 @@ func FillAttr(customMetadata *MapEntryMetadata, out *fuse.Attr) {
 	defer metadataMutex.Unlock()
 
 	(*out).Ino = (*customMetadata).Ino
-    (*out).Owner = fuse.Owner{Uid: customMetadata.Uid, Gid: customMetadata.Gid}
+	(*out).Owner = fuse.Owner{Uid: customMetadata.Uid, Gid: customMetadata.Gid}
 	(*out).Size = uint64((*customMetadata).Size)
 	(*out).Blocks = uint64((*customMetadata).Blocks)
 	(*out).Atime = uint64((*customMetadata).Atim.Sec)
@@ -219,9 +219,9 @@ func FillAttrOut(metadata *MapEntryMetadata, out *fuse.AttrOut) {
 	log.Printf("metadata: %+v\n", metadata)
 
 	// Fill the AttrOut with our custom attributes stored in our hash
-    (*out).Attr.Ino = (*metadata).Ino
+	(*out).Attr.Ino = (*metadata).Ino
 	(*out).Attr.Size = uint64((*metadata).Size)
-    (*out).Attr.Owner = fuse.Owner{Uid: (*metadata).Uid, Gid: (*metadata).Gid}
+	(*out).Attr.Owner = fuse.Owner{Uid: (*metadata).Uid, Gid: (*metadata).Gid}
 	(*out).Attr.Blocks = uint64((*metadata).Blocks)
 	(*out).Attr.Atime = uint64((*metadata).Atim.Sec)
 	(*out).Attr.Atimensec = uint32((*metadata).Atim.Nsec)

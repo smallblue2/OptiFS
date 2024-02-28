@@ -82,14 +82,13 @@ func RetrieveRecent(entry *MapEntry) *MapEntryMetadata {
 
 // Retrieves regular file metadata for a hash and refnum provided. Returns an error if it cannot be found
 func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (syscall.Errno, *MapEntryMetadata) {
-    log.Println("Entered REGFILE metadata lookup!")
+	log.Println("Entered REGFILE metadata lookup!")
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-    log.Println("Waiting on metadataMutex lock!")
+	log.Println("Waiting on metadataMutex lock!")
 	metadataMutex.RLock()
 	defer metadataMutex.RUnlock()
-    log.Println("Got lock")
-
+	log.Println("Got lock")
 
 	// First check for default values
 	//var defaultByteArray [64]byte
@@ -102,14 +101,14 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (syscall.Err
 
 	// Now actually query the hashmap
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
-        log.Println("FOUND HASH!")
+		log.Println("FOUND HASH!")
 		if nodeMetadata, ok := contentEntry.EntryList[refNum]; ok {
-            log.Println("FOUND ENTRY!")
+			log.Println("FOUND ENTRY!")
 			return fs.OK, nodeMetadata
 		}
 	}
 
-    log.Println("No entry found, returning ENODATA")
+	log.Println("No entry found, returning ENODATA")
 	//log.Println("contentHash and refNum didn't lead to MapEntryMetadata")
 	return fs.ToErrno(syscall.ENODATA), nil
 }
@@ -280,7 +279,7 @@ func MigrateRegularFileMetadata(oldMeta *MapEntryMetadata, newMeta *MapEntryMeta
 	(*newMeta).Gid = (*oldMeta).Gid
 	(*newMeta).Dev = (*oldMeta).Dev
 	(*newMeta).Ino = (*oldMeta).Ino
-    (*newMeta).Gen = (*oldMeta).Gen
+	(*newMeta).Gen = (*oldMeta).Gen
 	(*newMeta).XAttr = (*oldMeta).XAttr
 
 	// New attributes to refresh from stat

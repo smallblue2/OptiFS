@@ -16,7 +16,7 @@ func CreateDirEntry(path string) *MapEntryMetadata {
 	defer dirMutex.Unlock()
 
 	log.Printf("Created a new directory metadata entry for (%v)\n", path)
-    entry := &MapEntryMetadata{XAttr: make(map[string][]byte)}
+	entry := &MapEntryMetadata{XAttr: make(map[string][]byte)}
 	dirMetadataHash[path] = entry
 	return entry
 }
@@ -24,12 +24,12 @@ func CreateDirEntry(path string) *MapEntryMetadata {
 // Performs a lookup for a directory entry in the directoryMetadataHash with
 // the path being the key
 func LookupDirMetadata(path string) (syscall.Errno, *MapEntryMetadata) {
-    log.Println("Entered DIRECTORY metadata lookup!")
+	log.Println("Entered DIRECTORY metadata lookup!")
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	dirMutex.RLock()
 	defer dirMutex.RUnlock()
-    log.Println("Got lock")
+	log.Println("Got lock")
 
 	log.Printf("Looking up metadata for dir (%v)\n", path)
 	metadata, ok := dirMetadataHash[path]
@@ -58,7 +58,7 @@ func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t, stableAttr *fs.St
 	log.Println("Found the metadata struct")
 
 	// Now we can be sure the entry exists, let's update it
-    updateAllFromStat(metadata, unstableAttr, stableAttr, path)
+	updateAllFromStat(metadata, unstableAttr, stableAttr, path)
 
 	log.Printf("metadata: %+v\n", metadata)
 	log.Println("Updated all custom metadata attributes through lookup")

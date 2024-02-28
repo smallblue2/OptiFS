@@ -83,19 +83,19 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 		// -1 indicates that the respective value shouldn't change
 		safeUID, safeGID := -1, -1
 		if uok {
-            // Ensure it exists!
-            _, uidErr := user.LookupId(fmt.Sprintf("%x", uid))
-            if uidErr != nil {
-                return fs.ToErrno(syscall.EINVAL)
-            }
+			// Ensure it exists!
+			_, uidErr := user.LookupId(fmt.Sprintf("%x", uid))
+			if uidErr != nil {
+				return fs.ToErrno(syscall.EINVAL)
+			}
 			safeUID = int(uid)
 		}
 		if gok {
-            // Ensure it exists!
-            _, gidErr := user.LookupGroupId(fmt.Sprintf("%x", gid))
-            if gidErr != nil {
-                return fs.ToErrno(syscall.EINVAL)
-            }
+			// Ensure it exists!
+			_, gidErr := user.LookupGroupId(fmt.Sprintf("%x", gid))
+			if gidErr != nil {
+				return fs.ToErrno(syscall.EINVAL)
+			}
 			safeGID = int(gid)
 		}
 		// Try and update our custom metadata system isntead
@@ -142,13 +142,13 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 	// Same thing for modification and access times
 	mtime, mok := in.GetMTime()
 	atime, aok := in.GetATime()
-    ctime, cok := in.GetCTime()
+	ctime, cok := in.GetCTime()
 	if mok || aok {
 		log.Println("Setting time")
 		// Initialize pointers to the time values
 		ap := &atime
 		mp := &mtime
-        cp := &ctime
+		cp := &ctime
 		// Take into account if access of mod times are not both provided
 		if !aok {
 			ap = nil
@@ -156,9 +156,9 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 		if !mok {
 			mp = nil
 		}
-        if !cok {
-            cp = nil
-        }
+		if !cok {
+			cp = nil
+		}
 
 		// Create an array to hold timespec values for syscall
 		// This is a data structure that represents a time value
@@ -166,7 +166,7 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 		var times [3]syscall.Timespec
 		times[0] = fuse.UtimeToTimespec(ap)
 		times[1] = fuse.UtimeToTimespec(mp)
-        times[2] = fuse.UtimeToTimespec(cp)
+		times[2] = fuse.UtimeToTimespec(cp)
 
 		// Try and update our own custom metadata system first
 		if customMetadata != nil {
@@ -188,7 +188,7 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				log.Println("Updated underlying NODE time")
 			}
 			if f != nil {
-                // Line below is from github user Hanwen's go-fuse/fuse/nodefs/syscall_linux.go
+				// Line below is from github user Hanwen's go-fuse/fuse/nodefs/syscall_linux.go
 				_, _, err := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(f.fdesc), 0, uintptr(unsafe.Pointer(&times)), uintptr(0), 0, 0)
 				err = syscall.Errno(err)
 				if err != 0 {
@@ -251,11 +251,11 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 		out.FromStat(&stat)
 	}
 
-    // Update change time
-    if customMetadata != nil {
-        now := time.Now()
-        metadata.UpdateTime(customMetadata, nil, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, isDir)
-    }
+	// Update change time
+	if customMetadata != nil {
+		now := time.Now()
+		metadata.UpdateTime(customMetadata, nil, nil, &syscall.Timespec{Sec: now.Unix(), Nsec: int64(now.Nanosecond())}, isDir)
+	}
 
 	return fs.OK
 }
@@ -301,10 +301,10 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 
 	// TRY AND FIND CUSTOM NODE
 	ferr, sIno, sMode, sGen, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
-    // If we got an error (it doesn't exist) OR we have an uninitialised node (ref == 0, hash == [000...000] that isn't a directory)
+	// If we got an error (it doesn't exist) OR we have an uninitialised node (ref == 0, hash == [000...000] that isn't a directory)
 	if ferr != fs.OK || ((existingRef == 0 && existingHash == [64]byte{}) && s.Mode&syscall.S_IFMT != syscall.S_IFDIR) { // If custom node doesn't exist, create a new one
 		log.Println("Persistent node entry doesn't exist")
-        log.Println("BRAND NEW VIRTUAL NODE BEING CREATED")
+		log.Println("BRAND NEW VIRTUAL NODE BEING CREATED")
 
 		log.Printf("Mode: 0x%X\n", s.Mode)
 

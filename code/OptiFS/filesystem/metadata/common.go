@@ -193,7 +193,7 @@ func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool)
 	}
 	log.Println("Obtained lock")
 
-    // Put attributes into a string slice and sort them to create deterministic behaviour
+	// Put attributes into a string slice and sort them to create deterministic behaviour
 	var attrNames []string
 	for attrName := range customMetadata.XAttr {
 		attrNames = append(attrNames, attrName)
@@ -221,13 +221,13 @@ func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool)
 
 // Updates the Gen Number of the current MapEntryMetadata
 func UpdateGenNumber(current *MapEntryMetadata, isDir bool) {
-    if isDir {
-        dirMutex.Lock()
-        defer dirMutex.Unlock()
-    } else {
-        metadataMutex.Lock()
-        defer metadataMutex.Unlock()
-    }
+	if isDir {
+		dirMutex.Lock()
+		defer dirMutex.Unlock()
+	} else {
+		metadataMutex.Lock()
+		defer metadataMutex.Unlock()
+	}
 
-    current.Gen++
+	current.Gen++
 }

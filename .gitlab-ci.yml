@@ -24,3 +24,11 @@ test_hashing:
     - cd code/OptiFS/filesystem/hashing
   script:
     - go test -v ./
+
+test_vfs:
+  stage: unit_tests
+  image: golang:latest
+  before_script:
+    - cd code/OptiFS/filesystem/vfs
+  script:
+    - go test -v ./
