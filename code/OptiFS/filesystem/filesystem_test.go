@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -17,7 +18,10 @@ func mountFilesystem(t *testing.T) (mountpoint, underlying string, umountCmd *ex
 	underlying = t.TempDir()
 
 	// Start the filesystem
-	exec.Command("filesystem", "-rm-persistence", mountpoint, underlying).Start()
+    cmd := exec.Command("filesystem", mountpoint, underlying)
+    log.Println("Mounting: ", cmd.String())
+    cmd.Start()
+
 	// Wait a second to be safe
 	time.Sleep(1 * time.Second)
 
@@ -105,14 +109,14 @@ func TestCreateDuplicateFilesWithEcho(t *testing.T) {
 		content2 string
 	}{
 		{
-			name:    "Duplicate file - foobar",
+			name:     "Duplicate file - foobar",
 			file1:    "testfile1",
 			content1: "foobar",
 			file2:    "testfile2",
 			content2: "foobar",
 		},
 		{
-			name:    "Duplicate file - longer",
+			name:     "Duplicate file - longer",
 			file1:    "testfile3",
 			content1: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse tincidunt tincidunt odio a pretium. Morbi finibus justo a enim bibendum, in egestas lacus posuere. Mauris at lectus in tellus viverra finibus. Pellentesque fringilla elit quis vestibulum pretium. Morbi vestibulum leo at eros tempus, sit amet rhoncus nisi interdum. Morbi in sem pellentesque, mollis odio id, accumsan nisi. Aenean convallis ligula sed arcu pulvinar auctor. Etiam congue metus a accumsan placerat. Nam porttitor augue justo, in euismod libero ultricies a. Vivamus sollicitudin nunc est, id maximus lorem venenatis eget. Cras varius posuere diam vel placerat. Curabitur odio augue, tincidunt nec massa eu, feugiat convallis ante. Sed fringilla mattis justo, ac malesuada lectus placerat vel. Sed vulputate libero quis neque tempor, at commodo erat vestibulum. ",
 			file2:    "testfile4",
@@ -127,10 +131,10 @@ func TestCreateDuplicateFilesWithEcho(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 
 			// Create files for echo redirection
-            flags := os.O_WRONLY | os.O_CREATE
+			flags := os.O_WRONLY | os.O_CREATE
 
 			filePath1 := fmt.Sprintf("%v/%v", mnt, tc.file1)
-            fileWrite1, err1 := os.OpenFile(filePath1, flags, 0b110100100)
+			fileWrite1, err1 := os.OpenFile(filePath1, flags, 0b110100100)
 			if err1 != nil {
 				t.Errorf("Failed to create file1 to redirect echo to")
 			}
@@ -140,7 +144,7 @@ func TestCreateDuplicateFilesWithEcho(t *testing.T) {
 				t.Errorf("Failed to create file2 to redirect echo to")
 			}
 
-            // Fill files with Echo
+			// Fill files with Echo
 			cmd1 := exec.Command("echo", "-n", fmt.Sprintf("%v", tc.content1))
 			cmd1.Stdout = fileWrite1
 			log.Printf("Command: %v\n", cmd1.String())
@@ -148,9 +152,9 @@ func TestCreateDuplicateFilesWithEcho(t *testing.T) {
 			fileWrite1.Close()
 
 			cmd2 := exec.Command("echo", "-n", fmt.Sprintf("%v", tc.content2))
-            cmd2.Stdout = fileWrite2
+			cmd2.Stdout = fileWrite2
 			log.Printf("Command: %v\n", cmd2.String())
-            cmd2.Run()
+			cmd2.Run()
 			fileWrite2.Close()
 
 			// Ensure the file exists in OptiFS
@@ -189,23 +193,37 @@ func TestCreateDuplicateFilesWithEcho(t *testing.T) {
 				t.Errorf("Expected {%v}, got {%v}", tc.content2, string(content2))
 			}
 
-            // Now check that the files are correctly linked underneath
-            underlying1, underlying2 := &syscall.Stat_t{}, &syscall.Stat_t{}
-            underErr1 := syscall.Stat(fmt.Sprintf("%v/%v", und, tc.file1), underlying1)
+			// Now check that the files are correctly linked underneath
+			underlying1, underlying2 := &syscall.Stat_t{}, &syscall.Stat_t{}
+			underErr1 := syscall.Stat(fmt.Sprintf("%v/%v", und, tc.file1), underlying1)
 
-            if underErr1 != nil {
-                t.Error("Couldn't stat underlying node1")
-            }
-            underErr2 := syscall.Stat(fmt.Sprintf("%v/%v", und, tc.file2), underlying2)
-            if underErr2 != nil {
-                t.Error("Couldn't stat underlying node2")
-            }
-            if underlying1.Nlink != 2 {
-                t.Error("Incorrect link count on node1")
-            }
-            if underlying2.Nlink != 2 {
-                t.Error("Incorrect link count on node2")
-            }
+			if underErr1 != nil {
+				t.Error("Couldn't stat underlying node1")
+			}
+			underErr2 := syscall.Stat(fmt.Sprintf("%v/%v", und, tc.file2), underlying2)
+			if underErr2 != nil {
+				t.Error("Couldn't stat underlying node2")
+			}
+			if underlying1.Nlink != 2 {
+				t.Error("Incorrect link count on node1")
+			}
+			if underlying2.Nlink != 2 {
+				t.Error("Incorrect link count on node2")
+			}
 		})
 	}
+
+    var out1 bytes.Buffer
+    var out2 bytes.Buffer
+	lsCmdMount := exec.Command("ls", mnt)
+    lsCmdMount.Stdout = &out1
+	lsCmdMount.Run()
+	log.Println(lsCmdMount.String())
+    log.Printf("OptiFS:\n%v\n", out1.String())
+
+	lsCmdund := exec.Command("ls", und)
+    lsCmdund.Stdout = &out2
+	lsCmdund.Run()
+	log.Println(lsCmdund.String())
+    log.Printf("Underlying:\n%v\n", out2.String())
 }
