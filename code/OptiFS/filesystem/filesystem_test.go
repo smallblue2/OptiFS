@@ -6,27 +6,54 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
 )
 
 // Helper function for mounting the filesystem
-func mountFilesystem(t *testing.T) (mountpoint, underlying string, umountCmd *exec.Cmd) {
-	// Creat temp directory for mountpoints
-	mountpoint = t.TempDir()
-	underlying = t.TempDir()
+func mountFilesystem(t *testing.T) (mntPath, undPath string, cleanup func ()) {
+
+    // Make directories to run OptiFS
+    err1 := os.Mkdir("mountpoint", 0b111111111)
+    if err1 != nil {
+        t.Fatalf("Failed to create mountpoint dir")
+    }
+
+    err2 := os.Mkdir("underlying", 0b111111111)
+    if err2 != nil {
+        t.Fatalf("Failed to create underlying dir")
+    }
+
+    // Get the absolute path of both
+    mntPath, err3 := filepath.Abs("mountpoint")
+    if err3 != nil {
+        t.Fatalf("Failed to get mountpoint dir abs path")
+    }
+    log.Println(mntPath)
+    undPath, err4 := filepath.Abs("underlying")
+    if err4 != nil {
+        t.Fatalf("Failed to get underlying dir abs path")
+    }
+    log.Println(undPath)
 
 	// Start the filesystem
-    cmd := exec.Command("filesystem", mountpoint, underlying)
+    cmd := exec.Command("filesystem", "-rm-persistence", mntPath, undPath)
     log.Println("Mounting: ", cmd.String())
     cmd.Start()
 
 	// Wait a second to be safe
 	time.Sleep(1 * time.Second)
 
-	// Build umount command
-	umountCmd = exec.Command("umount", mountpoint)
+	// Build revert function
+    cleanup = func() {
+        exec.Command("umount", mntPath).Run()
+        os.RemoveAll(mntPath)
+        os.RemoveAll(undPath)
+        os.RemoveAll(fmt.Sprintf("%v/../save", undPath))
+        time.Sleep(1 * time.Second)
+    }
 
 	return
 }
@@ -55,8 +82,8 @@ func TestCreateFileWithEcho(t *testing.T) {
 		},
 	}
 
-	mnt, _, stop := mountFilesystem(t)
-	defer stop.Run()
+	mnt, _, cleanup := mountFilesystem(t)
+	defer cleanup()
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,8 +151,8 @@ func TestCreateDuplicateFilesWithEcho(t *testing.T) {
 		},
 	}
 
-	mnt, und, stop := mountFilesystem(t)
-	defer stop.Run()
+	mnt, und, cleanup := mountFilesystem(t)
+	defer cleanup()
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
