@@ -1,8 +1,9 @@
 stages:
-  - test
+  - unit_tests
+  - end_to_end_tests
 
 test_metadata:
-  stage: test
+  stage: unit_tests
   image: golang:latest
   before_script:
     - cd code/OptiFS/filesystem/metadata
@@ -10,7 +11,7 @@ test_metadata:
     - go test -v ./
 
 test_permissions:
-  stage: test
+  stage: unit_tests
   image: golang:latest
   before_script:
     - cd code/OptiFS/filesystem/permissions
@@ -18,9 +19,17 @@ test_permissions:
     - go test -v ./
 
 test_hashing:
-  stage: test
+  stage: unit_tests
   image: golang:latest
   before_script:
     - cd code/OptiFS/filesystem/hashing
+  script:
+    - go test -v ./
+
+test_filesystem:
+  stage: end_to_end_tests
+  image: golang:latest
+  before_script:
+    - cd code/OptiFS/filesystem
   script:
     - go test -v ./
