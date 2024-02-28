@@ -50,6 +50,9 @@ func TestCreateEmptyFileWithTouch(t *testing.T) {
 			log.Println(filePath)
 			exec.Command("touch", filePath).Run()
 
+            // Wait a second to be safe
+            time.Sleep(1 * time.Second)
+
 			// Ensure the file exists in OptiFS and underlying
 			over := &syscall.Stat_t{}
 			overLocation := fmt.Sprintf("%v/%v", mnt, tc.file)
@@ -58,12 +61,20 @@ func TestCreateEmptyFileWithTouch(t *testing.T) {
 				t.Errorf("Couldn't stat file in OptiFS")
 			}
 
+            if over.Size != 0 {
+                t.Error("Size of OptiFS node isn't 0\n")
+            }
+
 			under := &syscall.Stat_t{}
 			underLocation := fmt.Sprintf("%v/%v", und, tc.file)
 			log.Println(underLocation)
 			if err := syscall.Stat(underLocation, under); err != nil {
 				t.Errorf("Couldn't stat file in underlying filesystem")
 			}
+
+            if under.Size != 0 {
+                t.Error("Size of underlying node isn't 0\n")
+            }
 		})
 	}
 }
@@ -117,6 +128,12 @@ func TestCreateFileWithEcho(t *testing.T) {
 			if err := syscall.Stat(filePath, over); err != nil {
 				t.Errorf("File doesn't exist!")
 			}
+
+            // Ensure the file is the correct size
+            length := int64(len([]byte(tc.content)))
+            if over.Size != length {
+                t.Errorf("Size is incorrect, expected %v, got %v\n", over.Size, length)
+            }
 
 			// Ensure the file exists in OptiFS and underlying
 			content, err := os.ReadFile(filePath)
