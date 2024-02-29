@@ -8,7 +8,6 @@ import (
 	"filesystem/permissions"
 	"time"
 
-	"log"
 	"sync"
 	"syscall"
 
@@ -58,26 +57,20 @@ var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil)) // gets a lock on a file, waits fo
 // abstract reference to files, where the state of the file (open, offsets, reading etc)
 // can be tracked
 func NewOptiFSFile(fdesc int, attr fs.StableAttr, flags uint32, currentHash [64]byte, refNum uint64) *OptiFSFile {
-	log.Println("OptiFSFile handle created")
 	return &OptiFSFile{fdesc: fdesc, attr: attr, flags: flags, currentHash: currentHash, refNum: refNum}
 }
 
 // handles read operations (implements concurrency)
 func (f *OptiFSFile) Read(ctx context.Context, dest []byte, offset int64) (fuse.ReadResult, syscall.Errno) {
 
-	log.Println("Reading file")
 
-	log.Println("Checking for custom permissions")
 	// Check permissions of custom metadata (if available)
 	herr, fileMetadata := metadata.LookupRegularFileMetadata(f.currentHash, f.refNum)
 	if herr == fs.OK {
-		log.Println("Custom permissions found!")
 		allowed := permissions.CheckPermissions(ctx, fileMetadata, 0) // Check read perm
 		if !allowed {
-			log.Println("User isn't allowed to read file handle!")
 			return nil, syscall.EACCES
 		}
-		log.Println("User is allowed to read file handle")
 	}
 
 	// lock the operation, and make sure it doesnt unlock until function is exited

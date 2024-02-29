@@ -102,11 +102,6 @@ func main() {
 	if !(*removePersistence) {
 		metadata.RetrievePersistantStorage(dest) // retrieve the hashmaps
 		permissions.RetrieveSysadmin(dest)       // retrieve sysadmin info
-		// print for debugging purposes
-		metadata.PrintRegularFileMetadataHash()
-		metadata.PrintDirMetadataHash()
-		metadata.PrintNodePersistenceHash()
-		permissions.PrintSysadminInfo()
 	}
 
 	if !(*disableIntegrityCheck) {
@@ -130,9 +125,6 @@ func main() {
 			metadata.SavePersistantStorage(dest)
 			permissions.SaveSysadmin(dest)
 			// print for debugging purposes
-			metadata.PrintRegularFileMetadataHash()
-			metadata.PrintDirMetadataHash()
-			metadata.PrintNodePersistenceHash()
 		}()
 	}
 

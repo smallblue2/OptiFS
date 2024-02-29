@@ -1,8 +1,6 @@
 package hashing
 
 import (
-	"log"
-
 	"lukechampine.com/blake3"
 )
 
@@ -26,8 +24,6 @@ func HashContents(data []byte, flags uint32) [64]byte {
 	//if flags&syscall.O_CREAT != 0 {
 	//	log.Println("CREATING")
 	//}
-
-    log.Println("Hashing data...")
 
 	return blake3.Sum512(data)
 }

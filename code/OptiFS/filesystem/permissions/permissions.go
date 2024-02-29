@@ -3,7 +3,6 @@ package permissions
 import (
 	"context"
 	"filesystem/metadata"
-	"log"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -13,11 +12,9 @@ import (
 // Checks open syscall permissions
 func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, flags uint32) bool {
 
-    log.Println("Checking OPEN PERMISSIONS based on flags...")
 
 	// sysadmin is always allowed
 	if IsUserSysadmin(&ctx) {
-        log.Println("User is sysadmin.")
 	    return true
 	}
 
@@ -26,12 +23,10 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 	// Check the intent of the open flags
 	readIntent, writeIntent := checkOpenIntent(flags)
 
-	log.Printf("Write intent: {%v} || Read intent: {%v}\n", writeIntent, readIntent)
 
 	// If the open intends to read, check it has permission
 	if readIntent {
 		readPerm := CheckPermissions(ctx, nodeMetadata, 0)
-		log.Printf("Checked read perm -> {%v}\n", readPerm)
 		if !readPerm {
 			isAllowed = false
 		}
@@ -39,14 +34,12 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 	// If the open intends to write, check it has permission
 	if writeIntent {
 		writePerm := CheckPermissions(ctx, nodeMetadata, 1)
-		log.Printf("Checked write perm -> {%v}\n", writePerm)
 		if !writePerm {
 			isAllowed = false
 		}
 	}
 
 
-	log.Printf("Is allowed -> {%v}\n", isAllowed)
 	return isAllowed
 }
 
@@ -57,32 +50,25 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 // EXEC -> op = 2
 func CheckPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, op uint8) bool {
 
-    log.Println("Checking permissions...")
 
 	// sysadmin is always allowed
 	if IsUserSysadmin(&ctx) {
-        log.Println("User is sysadmin.")
 		return true
 	}
 
 	err1, uid, gid := GetUIDGID(ctx)
 	if err1 != fs.OK {
-		log.Println("Failed to get UIDGID, exiting.")
 		return false
 	}
 
 	switch op {
 	case 0: // Read permission check
-		log.Println("Checking read permissions")
 		return readCheck(uid, gid, nodeMetadata)
 	case 1:
-		log.Println("Checking write permissions")
 		return writeCheck(uid, gid, nodeMetadata)
 	case 2:
-		log.Println("Checking exec permissions")
 		return execCheck(uid, gid, nodeMetadata)
 	default:
-		log.Printf("Unknown operation permission check requested (%v)\n", op)
 		return false
 	}
 }
@@ -103,19 +89,14 @@ func execCheck(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata) 
 }
 
 func checkMode(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata, ownerFlag uint32, groupFlag uint32, otherFlag uint32) bool {
-	log.Println("Extracting mode...")
 	mode := nodeMetadata.Mode
 
-    log.Println("Performing bit operations...")
 	switch {
 	case isOwner(uid, nodeMetadata.Uid):
-		log.Println("User is the owner.")
 		return mode&ownerFlag != 0
 	case isGroup(gid, nodeMetadata.Gid):
-		log.Println("User is in the group.")
 		return mode&groupFlag != 0
 	default:
-		log.Println("User is considered other.")
 		return mode&otherFlag != 0
 	}
 
@@ -179,7 +160,6 @@ func checkOpenIntent(flags uint32) (readIntent bool, writeIntent bool) {
 func GetUIDGID(ctx context.Context) (syscall.Errno, uint32, uint32) {
 	caller, check := fuse.FromContext(ctx)
 	if !check {
-		log.Println("No caller info available")
 		return fs.ToErrno(syscall.ENODATA), 0, 0
 	}
 	return fs.OK, uint32(caller.Uid), uint32(caller.Gid)
@@ -195,7 +175,6 @@ func CheckMask(ctx context.Context, mask uint32, nodeMetadata *metadata.MapEntry
 	// Extract the UID and GID from the context
 	err1, currentUID, currentGID := GetUIDGID(ctx)
 	if err1 != fs.OK {
-		log.Println("Can't get user context")
 		return false
 	}
 
@@ -206,29 +185,21 @@ func CheckMask(ctx context.Context, mask uint32, nodeMetadata *metadata.MapEntry
 	switch {
 	case isOwner(currentUID, nodeMetadata.Uid):
 		// user is the owner
-		log.Println("User is the owner")
 		// Don't shift the mode at all, as the bits are in the correct place already
 		allowed = checkPermissionBits(mask, mode)
-		log.Printf("Owner requested %v, allowed: %v\n", mask, allowed)
 	case isGroup(currentGID, nodeMetadata.Gid):
 		// User is in the group
-		log.Println("User is in the group")
 		// shift mode 3 bits to the left to line up group permission bits to be under where user bits usually are
 		allowed = checkPermissionBits(mask, mode<<3)
-		log.Printf("Group member requested %v, allowed: %v\n", mask, allowed)
 	default:
 		// Check for others permissions
-		log.Println("User is under others")
 		// shift mode 6 bits to the left to line up other permission bits to be under where user bits usually are
 		allowed = checkPermissionBits(mask, mode<<6)
-		log.Printf("Other member requested %v, allowed: %v\n", mask, allowed)
 	}
 
 	if !allowed {
-		log.Println("NOT ALLOWED")
 		return false
 	}
 
-	log.Println("ALLOWED")
 	return true
 }

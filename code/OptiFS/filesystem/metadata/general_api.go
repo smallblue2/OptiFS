@@ -3,7 +3,6 @@
 package metadata
 
 import (
-	"log"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -58,11 +57,9 @@ func UpdateOwner(metadata *MapEntryMetadata, uid, gid *uint32, isDir bool) error
 
 	if uid != nil {
 		(*metadata).Uid = *uid
-		log.Println("Updated custom UID")
 	}
 	if gid != nil {
 		(*metadata).Gid = *gid
-		log.Println("Updated custom GID")
 	}
 	return nil
 }
@@ -82,15 +79,12 @@ func UpdateTime(metadata *MapEntryMetadata, atim, mtim, ctim *syscall.Timespec, 
 
 	if atim != nil {
 		(*metadata).Atim = *atim
-		log.Println("Updated custom ATime")
 	}
 	if mtim != nil {
 		(*metadata).Mtim = *mtim
-		log.Println("Updated custom MTime")
 	}
 	if ctim != nil {
 		(*metadata).Ctim = *ctim
-		log.Println("Updated custom CTime")
 	}
 	return nil
 }
@@ -110,11 +104,9 @@ func UpdateLocation(metadata *MapEntryMetadata, inode, dev *uint64, isDir bool) 
 
 	if inode != nil {
 		(*metadata).Ino = *inode
-		log.Println("Updated custom Inode")
 	}
 	if dev != nil {
 		(*metadata).Dev = *dev
-		log.Println("Updated custom Device")
 	}
 	return nil
 }
@@ -134,7 +126,6 @@ func UpdateSize(metadata *MapEntryMetadata, size *int64, isDir bool) error {
 
 	if size != nil {
 		(*metadata).Size = *size
-		log.Println("Updated custom Size")
 	}
 	return nil
 }
@@ -154,7 +145,6 @@ func UpdateLinkCount(metadata *MapEntryMetadata, linkCount *uint64, isDir bool) 
 
 	if linkCount != nil {
 		(*metadata).Nlink = *linkCount
-		log.Println("Updated custom Nlink")
 	}
 	return nil
 }
@@ -174,7 +164,6 @@ func UpdateMode(metadata *MapEntryMetadata, mode *uint32, isDir bool) error {
 
 	if mode != nil {
 		(*metadata).Mode = *mode
-		log.Println("Updated custom Mode")
 	}
 	return nil
 }
@@ -194,11 +183,9 @@ func UpdateMemoryPadding(metadata *MapEntryMetadata, X__pad0 *int32, X__unused *
 
 	if X__pad0 != nil {
 		(*metadata).X__pad0 = *X__pad0
-		log.Println("Updated custom X__pad0")
 	}
 	if X__unused != nil {
 		(*metadata).X__unused = *X__unused
-		log.Println("Updated custom X__unused")
 	}
 	return nil
 }
