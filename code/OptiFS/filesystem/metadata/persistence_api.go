@@ -301,6 +301,7 @@ func RetrieveDirMetadataHash(dest string) error {
 // for saving the hashmaps when system is shut off
 // preserves private hashmaps
 func SavePersistantStorage(dest string) {
+	log.Println("Taking snapshot of file system...")
 	SaveNodePersistenceHash(nodePersistenceHash, dest)
 	SaveMetadataMap(regularFileMetadataHash, dest)
 	SaveDirMetadataHash(dirMetadataHash, dest)
@@ -407,6 +408,5 @@ func InsureIntegrity() {
 func SaveStorageRegularly(dest string, interval int) {
 	for range time.Tick(time.Second * time.Duration(interval)) {
 		SavePersistantStorage(dest)
-		log.Println("Taking snapshot of file system...")
 	}
 }
