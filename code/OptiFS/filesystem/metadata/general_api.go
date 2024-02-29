@@ -15,13 +15,7 @@ func FullMapEntryMetadataUpdate(metadata *MapEntryMetadata, unstableAttr *syscal
 	// locks for this function are implemented in the functions being called
 	// done to prevent deadlock
 
-	log.Println("Updating metadata through struct...")
-	log.Printf("unstableAttr: %+v\n", unstableAttr)
-
 	updateAllFromStat(metadata, unstableAttr, stableAttr, path)
-
-	log.Printf("metadata: %+v\n", metadata)
-	log.Println("Updated all custom metadata attributes through struct")
 
 	return nil
 }
@@ -187,7 +181,7 @@ func UpdateMode(metadata *MapEntryMetadata, mode *uint32, isDir bool) error {
 
 // Function update C++ struct padding optimisation variables - not sure if they're used or needed
 // Accepts pointers, doesn't set nil values
-func UpdateWeirdCPPStuff(metadata *MapEntryMetadata, X__pad0 *int32, X__unused *[3]int64, isDir bool) error {
+func UpdateMemoryPadding(metadata *MapEntryMetadata, X__pad0 *int32, X__unused *[3]int64, isDir bool) error {
 	// we check to see if we are dealing with a directory or not
 	// so we know which lock to instantiate
 	if isDir {
@@ -216,8 +210,6 @@ func FillAttrOut(metadata *MapEntryMetadata, out *fuse.AttrOut) {
 	metadataMutex.Lock()
 	defer metadataMutex.Unlock()
 
-	log.Printf("metadata: %+v\n", metadata)
-
 	// Fill the AttrOut with our custom attributes stored in our hash
 	(*out).Attr.Ino = (*metadata).Ino
 	(*out).Attr.Size = uint64((*metadata).Size)
@@ -235,6 +227,4 @@ func FillAttrOut(metadata *MapEntryMetadata, out *fuse.AttrOut) {
 	(*out).Attr.Gid = uint32((*metadata).Gid)
 	(*out).Attr.Rdev = uint32((*metadata).Rdev)
 	(*out).Attr.Blksize = uint32((*metadata).Blksize)
-
-	log.Println("Filled AttrOut from custom metadata")
 }

@@ -24,13 +24,12 @@ var SysAdmin Sysadmin
 func SaveSysadmin(dest string) error {
 	// create the file if it doesn't exist, truncate it if it does
 	// we assume nobody will be calling this file, as it is a very unique name
-	test := dest + "/OptiFSSysadminSave.gob"
-	log.Printf("Saving sysadmin info here: %v\n", test)
+	log.Println("Saving sysadmin info")
 
 	file, err := os.Create(dest + "/OptiFSSysadminSave.gob")
 
 	if err != nil {
-		log.Println("ERROR WITH FILE - SYSADMIN")
+		log.Println("Couldn't create save file.")
 		return err
 	}
 
@@ -40,19 +39,24 @@ func SaveSysadmin(dest string) error {
 	eErr := encode.Encode(SysAdmin) // encode the hashmap into binary, put it in the file
 
 	if eErr != nil {
-		log.Println("ERROR WITH ENCODER - SYSADMIN")
+		log.Println("Couldn't encode sysadmin info.")
 		return eErr
 	}
 
-	return nil
+	log.Println("Succesfully saved sysadmin info.")
 
+	return nil
 }
 
 // retrieve the sysadmin details when the system boots up
 func RetrieveSysadmin(dest string) error {
+
+	log.Println("Retrieving sysadmin info")
+
 	file, err := os.Open(dest + "/OptiFSSysadminSave.gob") // open where the info was encoded
 
 	if err != nil {
+		log.Println("Couldn't open save file.")
 		return err
 	}
 
@@ -62,12 +66,13 @@ func RetrieveSysadmin(dest string) error {
 	dErr := decode.Decode(&SysAdmin) // decode the file back into the struct
 
 	if dErr != nil {
-		log.Println("ERROR WITH DECODER - SYSADMIN")
+		log.Println("Couldn't decode sysadmin info.")
 		return dErr
 	}
 
-	return nil
+	log.Println("Succesfully retrieved sysadmin info.")
 
+	return nil
 }
 
 // print the current sysadmin
@@ -78,7 +83,7 @@ func PrintSysadminInfo() {
 // get the UID and GID of the sysadmin that runs the filesystem
 // this is saved (persisent), so we only need to get it once
 func SetSysadmin() syscall.Errno {
-	log.Println("No Sysadmin found, setting user as sysadmin.")
+	log.Println("NO SYSADMIN SET - Setting user as sysadmin.")
 
 	sysadmin, sErr := user.Current() // get the current user
 	if sErr != nil {
@@ -88,13 +93,13 @@ func SetSysadmin() syscall.Errno {
 
 	u, uidConversionErr := strconv.Atoi(sysadmin.Uid) // get the UID
 	if uidConversionErr != nil {
-		log.Printf("Couldn't get sysadmin UID!: %v\n", uidConversionErr)
+		log.Printf("Couldn't get sysadmin UID: %v\n", uidConversionErr)
 		return fs.ToErrno(uidConversionErr)
 	}
 
 	g, gidConversionErr := strconv.Atoi(sysadmin.Gid) // get the GID
 	if gidConversionErr != nil {
-		log.Printf("Couldn't get sysadmin GID!: %v\n", gidConversionErr)
+		log.Printf("Couldn't get sysadmin GID: %v\n", gidConversionErr)
 		return fs.ToErrno(gidConversionErr)
 	}
 
@@ -104,7 +109,6 @@ func SetSysadmin() syscall.Errno {
 	SysAdmin.Set = true
 
 	return fs.OK
-
 }
 
 // checks if the user is the sysadmin of the system, or is in the same sysadmin group
@@ -113,12 +117,10 @@ func IsUserSysadmin(ctx *context.Context) bool {
 	// if we have a context to get it from
 	if ctx != nil {
 		ctxErr, uid, gid := GetUIDGID(*ctx)
-		log.Printf("Extracted from context: UID: %v GID: %v\n", uid, gid)
 		if ctxErr != fs.OK {
 			log.Fatalf("Couldn't get sysadmin UID from context!: %v\n", ctxErr)
 		}
 		if uid == SysAdmin.UID || gid == SysAdmin.GID {
-			log.Printf("Current Sysadmin: %+v\nYou are: %v, %v\n", SysAdmin, uid, gid)
 			return true
 		}
 	} else {
@@ -142,7 +144,6 @@ func IsUserSysadmin(ctx *context.Context) bool {
 
 		// if they have the same UID or are in the same group (sysadmin group)
 		if uint32(userUID) == SysAdmin.UID || uint32(userGID) == SysAdmin.GID {
-			log.Printf("Current Sysadmin: %+v\nYou are: %v, %v\n", SysAdmin, userUID, userGID)
 			return true
 		}
 
@@ -168,18 +169,17 @@ func ValidGID(gid string) bool {
 // it is checked before this function is called that the person calling it is a current sysadmin
 func ChangeSysadminUID(uid string) syscall.Errno {
 	if !ValidUID(uid) {
-		log.Printf("UID is NOT valid: %v\n", uid)
+        log.Printf("UID does not exist on system: {%v}\n", uid)
 		return fs.ToErrno(syscall.ENOENT)
 	}
 
 	// extract userID
 	newUid, conversionErr := strconv.Atoi(uid)
 	if conversionErr != nil {
-		log.Printf("Couldn't get new UID!: %v\n", conversionErr)
+		log.Printf("Invalid UID provided: {%v}\n", conversionErr)
 		return fs.ToErrno(syscall.ENOENT)
 	}
 	SysAdmin.UID = uint32(newUid) // set new UID
-	PrintSysadminInfo()
 
 	return fs.OK
 
@@ -189,18 +189,17 @@ func ChangeSysadminUID(uid string) syscall.Errno {
 // it is checked before this function is called that the person calling it is a current sysadmin
 func ChangeSysadminGID(gid string) syscall.Errno {
 	if !ValidUID(gid) {
-		log.Printf("GID is NOT valid: %v\n", gid)
+		log.Printf("GID does not exist on system: {%v}\n", gid)
 		return fs.ToErrno(syscall.ENOENT)
 	}
 
 	// extract GID
 	newGid, conversionErr := strconv.Atoi(gid)
 	if conversionErr != nil {
-		log.Printf("Couldn't get new GID!: %v\n", conversionErr)
+		log.Printf("Invalid GID provided: {%v}\n", conversionErr)
 		return fs.ToErrno(syscall.ENOENT)
 	}
 	SysAdmin.GID = uint32(newGid) // set new GID
-	PrintSysadminInfo()
 
 	return fs.OK
 

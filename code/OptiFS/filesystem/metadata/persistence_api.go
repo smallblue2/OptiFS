@@ -48,25 +48,20 @@ func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *u
 		return
 	}
 	if isDir != nil {
-		log.Println("Setting IsDir")
 		store.IsDir = *isDir
 	}
 	if stableAttr != nil {
-		log.Println("Setting stableAttr")
 		store.StableIno = stableAttr.Ino
 		store.StableGen = stableAttr.Gen
 		store.StableMode = stableAttr.Mode
 	}
 	if mode != nil {
-		log.Println("Setting mode")
 		store.Mode = *mode
 	}
 	if contentHash != nil {
-		log.Println("Setting contentHash")
 		store.ContentHash = *contentHash
 	}
 	if refNum != nil {
-		log.Println("Setting refNum")
 		store.RefNum = *refNum
 	}
 }
@@ -78,14 +73,14 @@ func RetrieveNodeInfo(path string) (syscall.Errno, uint64, uint32, uint64, uint3
 	nodeMutex.RLock()
 	defer nodeMutex.RUnlock()
 
-	//log.Printf("Searching for {%v} in {%+v}\n", path, nodePersistenceHash)
-
 	info, ok := nodePersistenceHash[path]
 	if !ok {
-		//log.Println("Failed to retrieve node!")
+		log.Println("Failed to retrieve node!")
 		return fs.ToErrno(syscall.ENODATA), 0, 0, 0, 0, false, [64]byte{}, 0
 	}
-	//log.Println("Retrieved node!")
+
+	log.Printf("Retrieved persistent data for {%v}.\n", path)
+
 	return fs.OK, info.StableIno, info.StableMode, info.StableGen, info.Mode, info.IsDir, info.ContentHash, info.RefNum
 }
 
@@ -96,6 +91,9 @@ func RemoveNodeInfo(path string) error {
 	defer nodeMutex.Unlock()
 
 	delete(nodePersistenceHash, path)
+
+    log.Printf("Removed persistent data for {%v}.\n", path)
+
 	return nil
 }
 
@@ -108,14 +106,14 @@ func SaveMetadataMap(hashmap map[[64]byte]*MapEntry, dest string) error {
 	metadataMutex.Lock()
 	defer metadataMutex.Unlock()
 
-	log.Println("SAVING METADATA HASHMAP")
+    log.Println("Saving regular file metadata hash map")
 
 	// create the file if it doesn't exist, truncate it if it does
 	// we assume nobody will be calling this file, as it is a very unique name
 	file, err := os.Create(dest + "/OptiFSRegularFileMetadataSave.gob")
 
 	if err != nil {
-		log.Printf("ERROR WITH FILE - {%+v} - METADATA HASHMAP\n", err)
+        log.Println("Failed to create save.")
 		return err
 	}
 
@@ -125,9 +123,11 @@ func SaveMetadataMap(hashmap map[[64]byte]*MapEntry, dest string) error {
 	eErr := encode.Encode(hashmap) // encode the hashmap into binary, put it in the file
 
 	if eErr != nil {
-		log.Printf("ERROR WITH ENCODER - {%+v} - METADATA HASHMAP\n", eErr)
+        log.Println("Failed to encode.")
 		return eErr
 	}
+
+	log.Println("Saved succesfully.")
 
 	return nil
 }
@@ -140,11 +140,12 @@ func RetrieveMetadataMap(dest string) error {
 	metadataMutex.Lock()
 	defer metadataMutex.Unlock()
 
-	log.Println("RETRIEVING METADATA HASHMAP")
+    log.Println("Retrieving regular file metadata hash map")
 
 	file, err := os.Open(dest + "/OptiFSRegularFileMetadataSave.gob") // open where the hashmap was encoded
 
 	if err != nil {
+        log.Println("Doesn't exist.")
 		return err
 	}
 
@@ -154,9 +155,11 @@ func RetrieveMetadataMap(dest string) error {
 	dErr := decode.Decode(&regularFileMetadataHash) // decode the file back into the hashmap
 
 	if dErr != nil {
-		log.Printf("ERROR WITH DECODER - {%+v} - METADATA HASHMAP\n", dErr)
+        log.Println("Failed to decode.")
 		return dErr
 	}
+
+	log.Println("Retrieved succesfully.")
 
 	return nil
 }
@@ -170,14 +173,14 @@ func SaveNodePersistenceHash(hashmap map[string]*NodeInfo, dest string) error {
 	nodeMutex.Lock()
 	defer nodeMutex.Unlock()
 
-	log.Println("SAVING NODE INFO HASHMAP")
+    log.Println("Saving persistence metadata hash map")
 
 	// create the file if it doesn't exist, truncate it if it does
 	// we assume nobody will be calling this file, as it is a very unique name
 	file, err := os.Create(dest + "/OptiFSNodePersistenceSave.gob")
 
 	if err != nil {
-		log.Printf("ERROR WITH FILE - {%+v} - NODE HASHMAP\n", err)
+        log.Println("Doesn't exist.")
 		return err
 	}
 
@@ -187,11 +190,11 @@ func SaveNodePersistenceHash(hashmap map[string]*NodeInfo, dest string) error {
 	eErr := encode.Encode(hashmap) // encode the hashmap into binary, put it in the file
 
 	if eErr != nil {
-		log.Printf("ERROR WITH ENCODER - {%+v} - NODE HASHMAP\n", eErr)
+		log.Println("Failed to encode.")
 		return eErr
 	}
 
-	log.Println("Saved succesfully!")
+	log.Println("Saved succesfully.")
 
 	return nil
 }
@@ -203,11 +206,12 @@ func RetrieveNodePersistenceHash(dest string) error {
 	nodeMutex.Lock()
 	defer nodeMutex.Unlock()
 
-	log.Println("RETRIEVING NODE HASHMAP")
+	log.Println("Retrieving persistence metadata hash map")
 
 	file, err := os.Open(dest + "/OptiFSNodePersistenceSave.gob") // open where the hashmap was encoded
 
 	if err != nil {
+        log.Println("Doesn't exist.")
 		return err
 	}
 
@@ -217,9 +221,11 @@ func RetrieveNodePersistenceHash(dest string) error {
 	dErr := decode.Decode(&nodePersistenceHash) // decode the file back into the hashmap
 
 	if dErr != nil {
-		log.Printf("ERROR WITH DECODER - {%+v} - NODE HASHMAP", dErr)
+		log.Println("Failed to decode.")
 		return dErr
 	}
+
+    log.Println("Retrieved succesfully.")
 
 	return nil
 }
@@ -232,14 +238,14 @@ func SaveDirMetadataHash(hashmap map[string]*MapEntryMetadata, dest string) erro
 	dirMutex.Lock()
 	defer dirMutex.Unlock()
 
-	log.Println("SAVING DIR HASHMAP")
+	log.Println("Saving directory metadata hash map")
 
 	// create the file if it doesn't exist, truncate it if it does
 	// we assume nobody will be calling this file, as it is a very unique name
 	file, err := os.Create(dest + "/OptiFSDirMetadataSave.gob")
 
 	if err != nil {
-		log.Printf("ERROR WITH FILE - {%+v} - DIR HASHMAP\n", err)
+        log.Println("Doesn't exist.")
 		return err
 	}
 
@@ -249,9 +255,11 @@ func SaveDirMetadataHash(hashmap map[string]*MapEntryMetadata, dest string) erro
 	eErr := encode.Encode(hashmap) // encode the hashmap into binary, put it in the file
 
 	if eErr != nil {
-		log.Printf("ERROR WITH ENCODER - {%+v} - DIR HASHMAP\n", eErr)
+        log.Println("Failed to encode.")
 		return eErr
 	}
+
+    log.Println("Saved succesfully.")
 
 	return nil
 
@@ -265,11 +273,12 @@ func RetrieveDirMetadataHash(dest string) error {
 	dirMutex.Lock()
 	defer dirMutex.Unlock()
 
-	log.Println("RETRIEVING DIR HASHMAP")
+	log.Println("Retrieving directory metadata hash map")
 
 	file, err := os.Open(dest + "/OptiFSDirMetadataSave.gob") // open where the hashmap was encoded
 
 	if err != nil {
+        log.Println("Doesn't exist.")
 		return err
 	}
 
@@ -279,9 +288,11 @@ func RetrieveDirMetadataHash(dest string) error {
 	dErr := decode.Decode(&dirMetadataHash) // decode the file back into the hashmap
 
 	if dErr != nil {
-		log.Printf("ERROR WITH DECODER - {%+v} - DIR HASHMAP\n", dErr)
+        log.Println("Failed to decode.")
 		return dErr
 	}
+
+    log.Println("Retrieved succesfully.")
 
 	return nil
 
@@ -338,6 +349,9 @@ func PrintNodePersistenceHash() {
 // Function looks through all retrieved hashmaps and ensures all their entries align with
 // data in the underlying filesystem
 func InsureIntegrity() {
+
+    log.Println("Checking integrity of metadata against underlying filesystem.")
+
 	// Collect any miss-entries
 	pathsToDelete := []struct {
 		path  string
@@ -346,6 +360,8 @@ func InsureIntegrity() {
 		ref   uint64
 	}{}
 
+    // Finds all discrepencies and stores them to be deleted
+    // Cannot delete them during iteration - messes up the loop
 	for path, nodeInfo := range nodePersistenceHash {
 		// check to see that the node exists
 		var st syscall.Stat_t
@@ -362,7 +378,7 @@ func InsureIntegrity() {
 		}
 	}
 
-	// Cleanup
+	// Deletes all incorrect metadata
 	for index := range pathsToDelete {
 		path := pathsToDelete[index].path
 		isDir := pathsToDelete[index].isDir
@@ -391,6 +407,6 @@ func InsureIntegrity() {
 func SaveStorageRegularly(dest string, interval int) {
 	for range time.Tick(time.Second * time.Duration(interval)) {
 		SavePersistantStorage(dest)
-		log.Println("Saving Persistent Stores!")
+		log.Println("Taking snapshot of file system...")
 	}
 }

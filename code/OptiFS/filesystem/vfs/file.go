@@ -58,7 +58,7 @@ var _ = (fs.FileSetlkwer)((*OptiFSFile)(nil)) // gets a lock on a file, waits fo
 // abstract reference to files, where the state of the file (open, offsets, reading etc)
 // can be tracked
 func NewOptiFSFile(fdesc int, attr fs.StableAttr, flags uint32, currentHash [64]byte, refNum uint64) *OptiFSFile {
-	//log.Println("NEW OPTIFSFILE CREATED")
+	log.Println("OptiFSFile handle created")
 	return &OptiFSFile{fdesc: fdesc, attr: attr, flags: flags, currentHash: currentHash, refNum: refNum}
 }
 

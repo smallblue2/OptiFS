@@ -4,7 +4,6 @@ package metadata
 
 import (
 	"bytes"
-	"log"
 	"sort"
 	"syscall"
 
@@ -14,18 +13,18 @@ import (
 // Function updates all MapEntryMetadata attributes from the given unstable attributes
 func updateAllFromStat(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t, stableAttr *fs.StableAttr, path string) {
 
-	log.Printf("New Mode: 0x%X\n", (*stableAttr).Mode)
-	// not sure if we should lock dirMutex or metadataMutex
-	// -> used in both sets of functions but takes in a MapEntryMetadata??
-
-	// needs a write lock as we are modifying the attributes
-	dirMutex.Lock()
-	defer dirMutex.Unlock()
+    // Check to see the appropriate hashmap to lock
+    if unstableAttr.Mode&syscall.S_IFDIR != 0 {
+        dirMutex.Lock()
+        defer dirMutex.Unlock()
+    } else {
+        metadataMutex.Lock()
+        defer metadataMutex.Unlock()
+    }
 
 	// Save the path here for dedup purposes
 	(*metadata).Path = path
 
-	log.Printf("New Mode: 0x%X\n", (*stableAttr).Mode)
 	// Take these from our stable attributes
 	(*metadata).Ino = (*stableAttr).Ino
 	(*metadata).Gen = (*stableAttr).Gen
@@ -55,25 +54,18 @@ func updateAllFromStat(metadata *MapEntryMetadata, unstableAttr *syscall.Stat_t,
 // Gets custom extended attributes
 func GetCustomXAttr(customMetadata *MapEntryMetadata, attr string, dest *[]byte, isDir bool) (uint32, syscall.Errno) {
 
-	log.Println("Getting custom xattr")
-
 	if customMetadata == nil || customMetadata.XAttr == nil {
-		log.Println("No custom metadata or XAttr available!")
 		return 0, fs.ToErrno(syscall.ENODATA) // Internal error or uninitialized structure
 	}
 
 	// Ensure to get the correct lock
-	log.Println("Getting correct lock")
 	if isDir {
-		log.Println("Requesting dirMutex write lock")
 		dirMutex.Lock()
 		defer dirMutex.Unlock()
 	} else {
-		log.Println("Requesting regfile write lock")
 		metadataMutex.Lock()
 		defer metadataMutex.Unlock()
 	}
-	log.Println("Obtained lock")
 
 	// Retrieve and ensure it exists
 	bytes, ok := customMetadata.XAttr[attr]
@@ -89,27 +81,18 @@ func GetCustomXAttr(customMetadata *MapEntryMetadata, attr string, dest *[]byte,
 // Sets custom extended attributes
 func SetCustomXAttr(customMetadata *MapEntryMetadata, attr string, data []byte, flags uint32, isDir bool) syscall.Errno {
 
-	log.Println("Setting custom xattr")
-
 	if customMetadata == nil || customMetadata.XAttr == nil {
-		log.Println("No custom metadata or XAttr available!")
 		return fs.ToErrno(syscall.ENODATA) // Internal error or uninitialized structure
 	}
 
 	// Ensure to get the correct lock
-	log.Println("Getting correct lock")
 	if isDir {
-		log.Println("Requesting dirMutex write lock")
 		dirMutex.Lock()
 		defer dirMutex.Unlock()
 	} else {
-		log.Println("Requesting regfile write lock")
 		metadataMutex.Lock()
 		defer metadataMutex.Unlock()
 	}
-	log.Println("Obtained lock")
-
-	log.Printf("XAttr Write Flag - {0x%X}\n", flags)
 
 	// Check flags
 	if flags&0x1 != 0 { // XATTR_CREATE FLAG
@@ -119,7 +102,6 @@ func SetCustomXAttr(customMetadata *MapEntryMetadata, attr string, data []byte, 
 			return fs.ToErrno(syscall.EEXIST)
 		}
 		customMetadata.XAttr[attr] = data
-		log.Printf("XATTR_CREATE operation performed: {%v} -> {%v}\n", attr, customMetadata.XAttr[attr])
 	} else if flags&0x2 != 0 { // XATTR_REPLACE FLAG
 		// Should fail if it doesn't exist
 		_, ok := customMetadata.XAttr[attr]
@@ -127,11 +109,9 @@ func SetCustomXAttr(customMetadata *MapEntryMetadata, attr string, data []byte, 
 			return fs.ToErrno(syscall.ENODATA)
 		}
 		customMetadata.XAttr[attr] = data
-		log.Printf("XATTR_REPLACE operation performed: {%v} -> {%v}\n", attr, customMetadata.XAttr[attr])
 	} else {
 		// Assume no specific operation defined, just set
 		customMetadata.XAttr[attr] = data
-		log.Printf("NO FLAG operation performed: {%v} -> {%v}\n", attr, customMetadata.XAttr[attr])
 	}
 
 	return fs.OK
@@ -140,25 +120,18 @@ func SetCustomXAttr(customMetadata *MapEntryMetadata, attr string, data []byte, 
 // Sets custom extended attributes
 func RemoveCustomXAttr(customMetadata *MapEntryMetadata, attr string, isDir bool) syscall.Errno {
 
-	log.Println("Removing custom xattr")
-
 	if customMetadata == nil || customMetadata.XAttr == nil {
-		log.Println("No custom metadata or XAttr available!")
 		return fs.ToErrno(syscall.ENODATA) // Internal error or uninitialized structure
 	}
 
 	// Ensure to get the correct lock
-	log.Println("Getting correct lock")
 	if isDir {
-		log.Println("Requesting dirMutex write lock")
 		dirMutex.Lock()
 		defer dirMutex.Unlock()
 	} else {
-		log.Println("Requesting regfile write lock")
 		metadataMutex.Lock()
 		defer metadataMutex.Unlock()
 	}
-	log.Println("Obtained lock")
 
 	// Ensure it exists, POSIX standard to return ENODATA
 	_, ok := customMetadata.XAttr[attr]
@@ -172,7 +145,6 @@ func RemoveCustomXAttr(customMetadata *MapEntryMetadata, attr string, isDir bool
 
 func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool) (uint32, syscall.Errno) {
 	if customMetadata == nil || customMetadata.XAttr == nil {
-		log.Println("No custom metadata or XAttr available!")
 		return 0, fs.ToErrno(syscall.ENODATA)
 	}
 
@@ -181,17 +153,13 @@ func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool)
 	}
 
 	// Lock handling remains the same...
-	log.Println("Getting correct lock")
 	if isDir {
-		log.Println("Requesting dirMutex write lock")
 		dirMutex.Lock()
 		defer dirMutex.Unlock()
 	} else {
-		log.Println("Requesting regfile write lock")
 		metadataMutex.Lock()
 		defer metadataMutex.Unlock()
 	}
-	log.Println("Obtained lock")
 
 	// Put attributes into a string slice and sort them to create deterministic behaviour
 	var attrNames []string
@@ -208,8 +176,6 @@ func ListCustomXAttr(customMetadata *MapEntryMetadata, dest *[]byte, isDir bool)
 		tempBuffer.WriteString(attrName)
 		tempBuffer.WriteByte(0)
 	}
-
-	log.Printf("Calculated size: %d", totalSizeNeeded) // Debugging
 
 	if uint32(len(*dest)) < totalSizeNeeded {
 		return totalSizeNeeded, fs.ToErrno(syscall.ERANGE)

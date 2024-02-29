@@ -13,6 +13,14 @@ import (
 // Checks open syscall permissions
 func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, flags uint32) bool {
 
+    log.Println("Checking OPEN PERMISSIONS based on flags...")
+
+	// sysadmin is always allowed
+	if IsUserSysadmin(&ctx) {
+        log.Println("User is sysadmin.")
+	    return true
+	}
+
 	isAllowed := true
 
 	// Check the intent of the open flags
@@ -37,10 +45,6 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 		}
 	}
 
-	// sysadmin is always allowed
-	if IsUserSysadmin(&ctx) {
-		isAllowed = true
-	}
 
 	log.Printf("Is allowed -> {%v}\n", isAllowed)
 	return isAllowed
@@ -53,8 +57,11 @@ func CheckOpenPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMe
 // EXEC -> op = 2
 func CheckPermissions(ctx context.Context, nodeMetadata *metadata.MapEntryMetadata, op uint8) bool {
 
+    log.Println("Checking permissions...")
+
 	// sysadmin is always allowed
 	if IsUserSysadmin(&ctx) {
+        log.Println("User is sysadmin.")
 		return true
 	}
 
@@ -99,16 +106,16 @@ func checkMode(uid uint32, gid uint32, nodeMetadata *metadata.MapEntryMetadata, 
 	log.Println("Extracting mode...")
 	mode := nodeMetadata.Mode
 
-	log.Println("Performing AND operation checks...")
+    log.Println("Performing bit operations...")
 	switch {
 	case isOwner(uid, nodeMetadata.Uid):
-		log.Println("User is the owner")
+		log.Println("User is the owner.")
 		return mode&ownerFlag != 0
 	case isGroup(gid, nodeMetadata.Gid):
-		log.Println("User is in the group")
+		log.Println("User is in the group.")
 		return mode&groupFlag != 0
 	default:
-		log.Println("User is considered other")
+		log.Println("User is considered other.")
 		return mode&otherFlag != 0
 	}
 
@@ -216,8 +223,6 @@ func CheckMask(ctx context.Context, mask uint32, nodeMetadata *metadata.MapEntry
 		allowed = checkPermissionBits(mask, mode<<6)
 		log.Printf("Other member requested %v, allowed: %v\n", mask, allowed)
 	}
-
-	// sysadmin is always allowed
 
 	if !allowed {
 		log.Println("NOT ALLOWED")

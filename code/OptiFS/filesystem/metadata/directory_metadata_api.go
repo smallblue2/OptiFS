@@ -3,7 +3,6 @@
 package metadata
 
 import (
-	"log"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -15,7 +14,6 @@ func CreateDirEntry(path string) *MapEntryMetadata {
 	dirMutex.Lock()
 	defer dirMutex.Unlock()
 
-	log.Printf("Created a new directory metadata entry for (%v)\n", path)
 	entry := &MapEntryMetadata{XAttr: make(map[string][]byte)}
 	dirMetadataHash[path] = entry
 	return entry
@@ -24,20 +22,15 @@ func CreateDirEntry(path string) *MapEntryMetadata {
 // Performs a lookup for a directory entry in the directoryMetadataHash with
 // the path being the key
 func LookupDirMetadata(path string) (syscall.Errno, *MapEntryMetadata) {
-	log.Println("Entered DIRECTORY metadata lookup!")
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
 	dirMutex.RLock()
 	defer dirMutex.RUnlock()
-	log.Println("Got lock")
 
-	log.Printf("Looking up metadata for dir (%v)\n", path)
 	metadata, ok := dirMetadataHash[path]
 	if !ok {
-		log.Println("Couldn't find a custom directory metadata entry")
 		return fs.ToErrno(syscall.ENODATA), nil
 	}
-	log.Println("Found a custom directory metadata entry")
 	return 0, metadata
 }
 
@@ -47,21 +40,15 @@ func UpdateDirEntry(path string, unstableAttr *syscall.Stat_t, stableAttr *fs.St
 	// locks for this function are implemented in the functions being called
 	// done to prevent deadlock
 
-	log.Println("Updating dir metadata through lookup...")
 	// Ensure that contentHash and refNum is valid
 	// this function has locks already!
 	err, metadata := LookupDirMetadata(path)
 	if err != 0 {
-		log.Println("Couldn't find the metadata struct")
 		return err
 	}
-	log.Println("Found the metadata struct")
 
 	// Now we can be sure the entry exists, let's update it
 	updateAllFromStat(metadata, unstableAttr, stableAttr, path)
-
-	log.Printf("metadata: %+v\n", metadata)
-	log.Println("Updated all custom metadata attributes through lookup")
 
 	return 0
 }

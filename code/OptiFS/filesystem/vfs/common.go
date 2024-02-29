@@ -22,6 +22,8 @@ import (
 // Assumes either an OptiFSNode input, or an OptiFSFile input.
 func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadata, in *fuse.SetAttrIn, n *OptiFSNode, f *OptiFSFile, out *fuse.AttrOut, isDir bool) syscall.Errno {
 
+    log.Printf("Setting node attributes for {%v}...\n", n.RPath())
+
 	// If we need to - Manually change the underlying attributes ourselves
 	var isOwner bool
 	var hasWrite bool
@@ -31,21 +33,16 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 	if customMetadata != nil {
 		log.Println("We have custom metadata!")
 		isOwner = permissions.IsOwner(ctx, customMetadata)
-		log.Printf("Is user owner: {%v}\n", isOwner)
 		hasWrite = permissions.CheckPermissions(ctx, customMetadata, 1)
-		log.Printf("Has write perm: {%v}\n", hasWrite)
 		path = customMetadata.Path
-
 	} else {
 		log.Println("No custom metadata!")
 		path = n.RPath()
 	}
 
-	log.Printf("Setting attributes for '%v'\n", path)
-
 	// If the mode needs to be changed
 	if mode, ok := in.GetMode(); ok {
-		log.Println("Setting Mode")
+        log.Println("Setting node MODE...")
 		if customMetadata != nil {
 			// Ensure the user has ownership of the file
 			if !isOwner {
@@ -53,7 +50,6 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 			}
 			// Try and modify our custom metadata system first
 			metadata.UpdateMode(customMetadata, &mode, isDir)
-			log.Println("Set custom mode")
 			// Otherwise, just handle the underlying node
 		} else {
 			// Change the mode to the new mode in the node if provided
@@ -61,14 +57,13 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				if err := syscall.Chmod(path, mode); err != nil {
 					return fs.ToErrno(err)
 				}
-				log.Println("Set underlying NODE mode")
-			}
+				log.Println("Set MODE in underlying filesystem")
+			} else if f != nil {
 			// Change the mode to the new mode in the file if provided
-			if f != nil {
 				if err := syscall.Fchmod(f.fdesc, mode); err != nil {
 					return fs.ToErrno(err)
 				}
-				log.Println("Set underlying FILEHANDLE mode")
+				log.Println("Set MODE through filehandle")
 			}
 		}
 	}
@@ -78,7 +73,7 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 	gid, gok := in.GetGID()
 	// If we have a UID or GID to set
 	if uok || gok {
-		log.Println("Setting UID & GID")
+        log.Println("Setting node UID & GID...")
 		// Set their default values to -1
 		// -1 indicates that the respective value shouldn't change
 		safeUID, safeGID := -1, -1
@@ -117,7 +112,6 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				saferGID = &tmp
 			}
 			metadata.UpdateOwner(customMetadata, saferUID, saferGID, isDir)
-			log.Println("Set custom UID & GID")
 			// Otherwise, just update the underlying node instead
 		} else {
 			if n != nil { // Update the underlying node if provided
@@ -126,15 +120,14 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				if err != nil {
 					return fs.ToErrno(err)
 				}
-				log.Println("Set underlying NODE UID & GID")
-			}
-			if f != nil { // Update the underlying file hande if provided
+				log.Println("Set UID & GID in underlying filesystem")
+			} else if f != nil { // Update the underlying file hande if provided
 				// Chown these values
 				err := syscall.Fchown(f.fdesc, safeUID, safeGID)
 				if err != nil {
 					return fs.ToErrno(err)
 				}
-				log.Println("Set underlying FILEHANDLE UID & GID")
+				log.Println("Set UID & GID through filehandle")
 			}
 		}
 	}
@@ -144,7 +137,7 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 	atime, aok := in.GetATime()
 	ctime, cok := in.GetCTime()
 	if mok || aok {
-		log.Println("Setting time")
+		log.Println("Setting node time...")
 		// Initialize pointers to the time values
 		ap := &atime
 		mp := &mtime
@@ -176,7 +169,6 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				return syscall.EACCES
 			}
 			metadata.UpdateTime(customMetadata, &times[0], &times[1], &times[2], isDir)
-			log.Println("Set custom time")
 			// OTHERWISE update the underlying file
 		} else {
 			// Call the utimenano syscall, ensuring to convert our time array
@@ -185,23 +177,22 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				if err := syscall.UtimesNano(path, times[:]); err != nil {
 					return fs.ToErrno(err)
 				}
-				log.Println("Updated underlying NODE time")
-			}
-			if f != nil {
+				log.Println("Updated time through node.")
+			} else if f != nil {
 				// Line below is from github user Hanwen's go-fuse/fuse/nodefs/syscall_linux.go
 				_, _, err := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(f.fdesc), 0, uintptr(unsafe.Pointer(&times)), uintptr(0), 0, 0)
 				err = syscall.Errno(err)
 				if err != 0 {
 					return fs.ToErrno(err)
 				}
-				log.Println("Updated underlying FILEHANDLE time")
+				log.Println("Updated time through filehandle.")
 			}
 		}
 	}
 
 	// If we have a size to update, do so as well
 	if size, ok := in.GetSize(); ok {
-		log.Println("Updating size")
+		log.Println("Updating node size...")
 		// First try and change the custom metadata system
 		if customMetadata != nil {
 			// Ensure we have write permissions to be updating the size
@@ -217,20 +208,19 @@ func SetAttributes(ctx context.Context, customMetadata *metadata.MapEntryMetadat
 				if err := syscall.Truncate(path, int64(size)); err != nil {
 					return fs.ToErrno(err)
 				}
-				log.Println("Updated underlying NODE size")
+				log.Println("Updated size in underlying filesystem.")
 			}
 			if f != nil { // Update the underlying filehandle if available
 				// Change the size
 				if err := fs.ToErrno(syscall.Ftruncate(f.fdesc, int64(size))); err != 0 {
 					return err
 				}
-				log.Println("Updated underlying FILEHANDLE size")
+				log.Println("Updated size through filehandle.")
 			}
 		}
 	}
 
 	if out != nil { // If we have attributes to fill out (ONLY FOR NODES)
-		log.Println("Filling AttrOut")
 		// Now reflect these changes in the out stream
 		// Use our custom datastruct if we can
 		if customMetadata != nil {
@@ -277,14 +267,11 @@ func HandleHardlinkInstantiation(ctx context.Context, n *OptiFSNode, targetPath,
 
 	// Create a new node to represent the underlying hardlink
 	nd := n.RootNode.newNode(n.EmbeddedInode(), name, s)
-	log.Println("Created new InodeEmbedder")
 
 	// Create the inode structure within FUSE, using the SOURCE's stable attr
 	x := n.NewInode(ctx, nd, *stable)
-	log.Println("Created Inode")
 
 	out.Attr.FromStat(s)
-	log.Println("Filled out from stat")
 
 	// Persistently store the info
 	metadata.StoreRegFileInfo(targetPath, stable, s.Mode, sHash, sRef)
@@ -303,42 +290,33 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 	ferr, sIno, sMode, sGen, _, isDir, existingHash, existingRef := metadata.RetrieveNodeInfo(nodePath)
 	// If we got an error (it doesn't exist) OR we have an uninitialised node (ref == 0, hash == [000...000] that isn't a directory)
 	if ferr != fs.OK || ((existingRef == 0 && existingHash == [64]byte{}) && s.Mode&syscall.S_IFMT != syscall.S_IFDIR) { // If custom node doesn't exist, create a new one
-		log.Println("Persistent node entry doesn't exist")
-		log.Println("BRAND NEW VIRTUAL NODE BEING CREATED")
-
-		log.Printf("Mode: 0x%X\n", s.Mode)
+		log.Println("Persistent node entry doesn't exist - NEW VIRTUAL NODE")
 
 		// Create a new node to represent the underlying looked up file
 		// or directory in our VFS
 		nd := n.RootNode.newNode(n.EmbeddedInode(), name, s)
-		log.Println("Created new InodeEmbedder")
 
 		// Create the inode structure within FUSE, copying the underlying
 		// file's attributes with an auto generated inode in idFromStat
 		newStable := n.RootNode.getNewStableAttr(s, &nodePath)
-		log.Printf("Mode inside newStable: 0x%X\n", newStable.Mode)
 		x := n.NewInode(ctx, nd, newStable)
-		log.Println("Created Inode")
-
-		log.Printf("Mode: 0x%X\n", x.StableAttr())
 
 		// Fill the output attributes from out stat struct
 		out.Attr.FromStat(s)
-		log.Println("Filled out from stat")
 
 		// Check if the lookup is for a directory or not
 		stable := x.StableAttr()
 		if s.Mode&syscall.S_IFMT == syscall.S_IFDIR {
 			// Store the persistent data
 			metadata.StoreDirInfo(nodePath, &stable, s.Mode)
-			log.Println("STORED DIRECTORY PERSISTENT DATA")
+			log.Println("Stored directory persistent data")
 			// Create and store the custom metadata
 			metadata.CreateDirEntry(nodePath)
 			metadata.UpdateDirEntry(nodePath, s, &stable)
-			log.Println("STORED DIRECTORY CUSTOM METADATA")
+			log.Println("Stored directory custom metadata")
 		} else {
 			// Store the persistent data
-			log.Println("STORED REGULAR FILE PERSISTENT DATA")
+			log.Println("Stored regular file persistent data")
 			metadata.StoreRegFileInfo(nodePath, &stable, s.Mode, [64]byte{}, 0)
 			// Don't create a custom metadata entry here;
 			//     custom metadata for regular files are indexed by their content's index
@@ -351,27 +329,24 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		return fs.OK, x, fh
 	}
 
-	log.Printf("Found existing persistent node entry - ISDIR: {%v} REFNUM {%v} HASH {%+v}\n", isDir, existingRef, existingHash)
+	log.Printf("Found existing persistent node entry - CONSTRUCTING EXISTING VIRTUAL NODE")
 
 	stable := &fs.StableAttr{Ino: sIno, Mode: sMode, Gen: sGen}
 
 	var nd fs.InodeEmbedder
 	// Create a node with the existing attributes we found
 	if !isDir {
-		log.Println("IS A REGULAR FILE!")
+		log.Println("Node is a regular file")
 
 		nd = n.RootNode.existingNode(existingHash, existingRef)
-		log.Println("Created existing InodeEmbedder!")
 
 		cerr, customMetadata := metadata.LookupRegularFileMetadata(existingHash, existingRef)
 		if cerr != fs.OK {
 			// Must be an empty or special file
-			log.Println("Must be an empty or special file")
 			// TODO: Do we need to do anything special here?
 		}
 
 		metadata.FillAttr(customMetadata, &out.Attr)
-		log.Println("Filled out attributes with custom metadata!")
 
 		if fdesc != nil && flags != nil {
 			fh = NewOptiFSFile(*fdesc, *stable, *flags, existingHash, existingRef)
@@ -382,10 +357,9 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 		return fs.OK, x, fh
 
 	} else {
-		log.Println("IS A DIRECTORY!")
+		log.Println("Node is a directory")
 
 		nd = n.RootNode.newNode(n.EmbeddedInode(), name, s)
-		log.Println("Created new InodeEmbedder!")
 
 		cerr, customMetadata := metadata.LookupDirMetadata(nodePath)
 		if cerr != 0 {
@@ -393,7 +367,6 @@ func HandleNodeInstantiation(ctx context.Context, n *OptiFSNode, nodePath string
 			return fs.ToErrno(syscall.ENODATA), nil, nil
 		}
 		metadata.FillAttr(customMetadata, &out.Attr)
-		log.Println("Filled out attributes with custom metadata!")
 
 		x := n.NewInode(ctx, nd, *stable)
 

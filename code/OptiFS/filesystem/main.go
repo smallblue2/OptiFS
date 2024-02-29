@@ -1,4 +1,4 @@
-package filesystem
+package main
 
 import (
 	"filesystem/metadata"
