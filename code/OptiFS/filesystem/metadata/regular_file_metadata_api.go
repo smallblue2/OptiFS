@@ -31,8 +31,8 @@ func IsContentHashUnique(contentHash [64]byte) bool {
 
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-	metadataMutex.RLock()
-	defer metadataMutex.RUnlock()
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	// Check to see if there's an entry for the contentHash and refNum above
 	_, exists := regularFileMetadataHash[contentHash]
@@ -50,8 +50,8 @@ func IsContentHashUnique(contentHash [64]byte) bool {
 func RetrieveRecent(entry *MapEntry) *MapEntryMetadata {
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-	metadataMutex.RLock()
-	defer metadataMutex.RUnlock()
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	indx := entry.IndexCounter
 	// If it's empty, return nothing
@@ -71,8 +71,8 @@ func RetrieveRecent(entry *MapEntry) *MapEntryMetadata {
 func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (syscall.Errno, *MapEntryMetadata) {
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-	metadataMutex.RLock()
-	defer metadataMutex.RUnlock()
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	// Now actually query the hashmap
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
@@ -90,8 +90,8 @@ func LookupRegularFileMetadata(contentHash [64]byte, refNum uint64) (syscall.Err
 func LookupRegularFileEntry(contentHash [64]byte) (syscall.Errno, *MapEntry) {
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-	metadataMutex.RLock()
-	defer metadataMutex.RUnlock()
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	entry, ok := regularFileMetadataHash[contentHash]
 	if !ok {
@@ -139,8 +139,8 @@ func RetrieveRegularFileMapEntryFromHashAndRef(contentHash [64]byte, refNum uint
 
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-	metadataMutex.RLock()
-	defer metadataMutex.RUnlock()
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	// Now actually query the hashmap
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
@@ -163,8 +163,8 @@ func RetrieveRegularFileMapEntryAndMetadataFromHashAndRef(contentHash [64]byte, 
 
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-	metadataMutex.RLock()
-	defer metadataMutex.RUnlock()
+	metadataMutex.Lock()
+	defer metadataMutex.Unlock()
 
 	// Now actually query the hashmap
 	if contentEntry, ok := regularFileMetadataHash[contentHash]; ok {
@@ -291,9 +291,9 @@ func InitialiseNewDuplicateFileMetadata(newMeta *MapEntryMetadata, spareUnstable
 // Creates a new MapEntry in the main hash map when provided with a contentHash
 // If the MapEntry already exists, we will simply pass back the already created MapEntry
 func CreateRegularFileMapEntry(contentHash [64]byte) *MapEntry {
-	metadataMutex.RLock()
+	metadataMutex.Lock()
 	if entry, ok := regularFileMetadataHash[contentHash]; ok {
-		metadataMutex.RUnlock() // unlock the process
+		metadataMutex.Unlock() // unlock the process
 		return entry
 	}
 	metadataMutex.RUnlock() // unlock the process

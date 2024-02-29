@@ -24,8 +24,8 @@ func CreateDirEntry(path string) *MapEntryMetadata {
 func LookupDirMetadata(path string) (syscall.Errno, *MapEntryMetadata) {
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-	dirMutex.RLock()
-	defer dirMutex.RUnlock()
+	dirMutex.Lock()
+	defer dirMutex.Unlock()
 
 	metadata, ok := dirMetadataHash[path]
 	if !ok {

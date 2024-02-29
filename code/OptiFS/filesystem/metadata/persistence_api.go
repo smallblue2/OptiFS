@@ -67,8 +67,8 @@ func UpdateNodeInfo(path string, isDir *bool, stableAttr *fs.StableAttr, mode *u
 func RetrieveNodeInfo(path string) (syscall.Errno, uint64, uint32, uint64, uint32, bool, [64]byte, uint64) {
 	// needs a read lock as data is not being modified, only read, so multiple
 	// operations can read at the same time (concurrently)
-	nodeMutex.RLock()
-	defer nodeMutex.RUnlock()
+	nodeMutex.Lock()
+	defer nodeMutex.Unlock()
 
 	info, ok := nodePersistenceHash[path]
 	if !ok {
