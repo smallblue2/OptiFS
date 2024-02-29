@@ -118,6 +118,8 @@ func main() {
 	log.Printf("DEBUG: %v", options.Debug)
 	log.Printf("RMPERSIST: %v", *removePersistence)
 	log.Printf("DISABLEICHECK: %v", *disableIntegrityCheck)
+	log.Printf("SAVE INTERVAL: %v", *interval)
+	log.Printf("SAVE LOCATION: %v", dest)
 	log.Println("=========================================================")
 	// when we are shutting down the filesystem, save the hashmaps
 
