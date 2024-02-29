@@ -11,12 +11,10 @@ import (
 	"path"
 	"path/filepath"
 	"time"
-
 	"github.com/hanwen/go-fuse/v2/fs"
 )
 
 func main() {
-	log.Println("Starting OptiFS")
 	log.SetFlags(log.Lmicroseconds)
 	debug := flag.Bool("debug", false, "enter debug mode")
 	removePersistence := flag.Bool("rm-persistence", false, "remove persistence saving (saving of virtual node metadata)")
