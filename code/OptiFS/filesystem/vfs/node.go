@@ -1695,7 +1695,7 @@ func (n *OptiFSNode) Mknod(ctx context.Context, name string, mode uint32, dev ui
 	// Create the node
     log.Println("Performing Mknod on underlying filesystem...")
 	if err := syscall.Mknod(nodePath, mode, int(dev)); err != nil {
-        log.Println("Mknode failed - %v\n", err)
+        log.Printf("Mknode failed - %v\n", err)
 		return nil, fs.ToErrno(err)
 	}
 
