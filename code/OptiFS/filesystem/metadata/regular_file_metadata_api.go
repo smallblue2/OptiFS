@@ -292,15 +292,10 @@ func InitialiseNewDuplicateFileMetadata(newMeta *MapEntryMetadata, spareUnstable
 // If the MapEntry already exists, we will simply pass back the already created MapEntry
 func CreateRegularFileMapEntry(contentHash [64]byte) *MapEntry {
 	metadataMutex.Lock()
+    defer metadataMutex.Unlock()
 	if entry, ok := regularFileMetadataHash[contentHash]; ok {
-		metadataMutex.Unlock() // unlock the process
 		return entry
 	}
-	metadataMutex.RUnlock() // unlock the process
-
-	// now we lock for writing, as we are creating a new entry
-	metadataMutex.Lock()
-	defer metadataMutex.Unlock()
 
 	// Create the entry - it doesn't exist
 	newEntry := &MapEntry{
