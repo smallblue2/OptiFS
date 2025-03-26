@@ -1,12 +1,8 @@
 
 # OptiFS - A Modern Day Optimised Network File Management System
 
-![Pipeline passing status](https://gitlab.computing.dcu.ie/collinz2/2024-ca326-zcollins-optifs/badges/main/pipeline.svg)
-![Current release of OptiFS](https://gitlab.computing.dcu.ie/collinz2/2024-ca326-zcollins-optifs/-/badges/release.svg
-)
-
 ## Description
-OptiFS is an intermediary virtual filesystem intended to be used over NFS with large groups of machines and users simultaneously. 
+OptiFS is a multi-user virtual filesystem with a focus on de-duplication, compatible with NFS.
 
 OptiFS strategically intercepts system calls from the user and implements custom behaviour on files or directories to  optimise storage through content deduplication. 
 
@@ -28,4 +24,6 @@ If you would like to know about how the project works, problems we encountered a
 [Zoe Collins](mailto:zoe.collins2@mail.dcu.ie) - Main Contributor
 
 ## Project status
-The current release is v1.0.0, but the project is still in continuous development, and bugs are still to likely arise!
+The current release is v1.0.0 and development has stopped.
+
+This project was a penultimate College paired project.
